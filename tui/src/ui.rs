@@ -144,10 +144,81 @@ fn window(len: usize, sel: usize, height: usize) -> (usize, usize) {
     (start, start + height)
 }
 
+/// Bu boyutun altinda normal arayuz CIZILMEZ (bkz. `draw`).
+/// (Termux'ta pinch-zoom ile font buyutulunce satir/sutun sayisi duser.)
+pub const MIN_COLS: u16 = 20;
+pub const MIN_ROWS: u16 = 8;
+
+/// Ust/yan panellerin toplam yuzdesi; artani ESMEYEN govde paneli alir.
+/// Ornek: 13+15+13+4 = %45 yan/ust bantlar, kalan ~%55 govde.
+const PCT_HEADER: u16 = 13;
+const PCT_QUEUE: u16 = 15;
+const PCT_LOG: u16 = 13;
+const PCT_STATUS: u16 = 4;
+
+/// Ana ekran satir plani.
+///
+/// SABIT `Length` YOK: sabitler yuzde olarak verilir, artan satirlar
+/// `Min` ile esneyen govde paneline gider. Boylece terminal buyuyup
+/// kuculdukce (pinch-zoom, pencere boyutu) hicbir panel tasmaz,
+/// ust uste binmez; toplam her zaman tam olarak alan yuksekligine esittir.
+pub fn main_layout(area: Rect) -> std::rc::Rc<[Rect]> {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage(PCT_HEADER), // baslik
+            Constraint::Min(3),                 // govde (esneyen)
+            Constraint::Percentage(PCT_QUEUE),  // kuyruk
+            Constraint::Percentage(PCT_LOG),    // log
+            Constraint::Percentage(PCT_STATUS), // durum satiri
+        ])
+        .split(area)
+}
+
 pub fn draw(f: &mut Frame, app: &mut App) {
     let p = Palette::for_app(app);
     let area = f.area();
-    f.render_widget(Block::default().style(Style::default().bg(p.bg)), area);
+
+    // Renksiz (NO_COLOR) modda arka plan da boyanmaz
+    if !p.plain {
+        f.render_widget(Block::default().style(Style::default().bg(p.bg)), area);
+    }
+
+    // 1) Terminal cok kucukse: kirik layout yerine tek satir mesaj.
+    //    (Termux'ta pinch-zoom ile font buyutulunce satir/sutun sayisi duser;
+    //     bu koruma olmadan paneller ust uste binerdi.)
+    if area.width < MIN_COLS || area.height < MIN_ROWS {
+        let msg = format!(
+            "{} — {}x{} (min {}x{})",
+            tr(app.lang, Key::TooSmallTitle),
+            area.width,
+            area.height,
+            MIN_COLS,
+            MIN_ROWS
+        );
+        let satir = Line::from(Span::styled(
+            util::truncate(&msg, area.width as usize),
+            Style::default().fg(p.warn).add_modifier(Modifier::BOLD),
+        ));
+        f.render_widget(
+            Paragraph::new(satir)
+                .alignment(ratatui::layout::Alignment::Center)
+                .wrap(Wrap { trim: true }),
+            Rect {
+                x: area.x,
+                y: area.y + area.height / 2,
+                width: area.width,
+                height: 1.min(area.height),
+            },
+        );
+        return;
+    }
+
+    // 2) Termux depolama izni yoksa: dosya gezici yerine net Turkce hata ekrani
+    if app.storage_error.is_some() {
+        draw_storage_error(f, app, &p, area);
+        return;
+    }
 
     if matches!(app.mode, Mode::Browse) {
         draw_browse(f, app, &p);
@@ -155,18 +226,7 @@ pub fn draw(f: &mut Frame, app: &mut App) {
     }
 
     let narrow = area.width < 110;
-    let queue_h = if app.jobs.is_empty() { 3 } else { (app.jobs.len() as u16 + 2).min(8) };
-    let log_h = 5;
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(6),
-            Constraint::Length(queue_h),
-            Constraint::Length(log_h),
-            Constraint::Length(2),
-        ])
-        .split(area);
+    let chunks = main_layout(area);
 
     draw_header(f, app, &p, chunks[0]);
 
@@ -178,7 +238,10 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         );
         let inner = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(1), Constraint::Min(3)])
+            .constraints([
+                Constraint::Percentage(10), // sekme satiri
+                Constraint::Min(2),         // panel (esneyen)
+            ])
             .split(chunks[1]);
         let body = inner[1];
         match app.focus {
@@ -271,7 +334,12 @@ fn draw_header(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(p.dim));
-    f.render_widget(Paragraph::new(Line::from(spans)).block(block), area);
+    f.render_widget(
+        Paragraph::new(Line::from(spans))
+            .wrap(Wrap { trim: true })
+            .block(block),
+        area,
+    );
 }
 
 fn tabs_line<'a>(app: &App, p: &Palette, _area: Rect) -> Paragraph<'a> {
@@ -295,7 +363,7 @@ fn tabs_line<'a>(app: &App, p: &Palette, _area: Rect) -> Paragraph<'a> {
         ));
         spans.push(Span::raw(" "));
     }
-    Paragraph::new(Line::from(spans))
+    Paragraph::new(Line::from(spans)).wrap(Wrap { trim: true })
 }
 
 fn draw_status(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
@@ -309,7 +377,7 @@ fn draw_status(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
     let line = Line::from(vec![
         Span::styled(hint, Style::default().fg(p.dim)),
     ]);
-    f.render_widget(Paragraph::new(line), area);
+    f.render_widget(Paragraph::new(line).wrap(Wrap { trim: true }), area);
 }
 
 // ---------------------------------------------------------------------------
@@ -332,7 +400,7 @@ fn draw_files(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
             Line::from(""),
             Line::from(Span::styled("  a = dosya / klasor ekle", Style::default().fg(p.dim))),
         ]);
-        f.render_widget(Paragraph::new(txt).block(block).wrap(Wrap { trim: false }), area);
+        f.render_widget(Paragraph::new(txt).block(block).wrap(Wrap { trim: true }), area);
         return;
     }
     let inner_h = area.height.saturating_sub(2) as usize;
@@ -378,7 +446,10 @@ fn draw_profile(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(6), Constraint::Length(7)])
+        .constraints([
+            Constraint::Percentage(62), // preset/ayar satirlari
+            Constraint::Percentage(38), // komut onizlemesi
+        ])
         .split(inner);
     let mut lines: Vec<Line> = Vec::new();
     let l = app.lang;
@@ -473,7 +544,7 @@ fn draw_profile(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
     f.render_widget(
         Paragraph::new(Text::from(lines))
             .block(Block::default())
-            .wrap(Wrap { trim: false }),
+            .wrap(Wrap { trim: true }),
         chunks[0],
     );
 
@@ -496,7 +567,7 @@ fn draw_profile(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
                     .borders(Borders::TOP)
                     .border_style(Style::default().fg(p.dim)),
             )
-            .wrap(Wrap { trim: false }),
+            .wrap(Wrap { trim: true }),
         chunks[1],
     );
 }
@@ -544,16 +615,19 @@ fn draw_details(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
     f.render_widget(block, area);
     let Some(m) = app.selected_media() else {
         f.render_widget(
-            Paragraph::new(Span::styled(tr(app.lang, Key::NoFiles), Style::default().fg(p.dim))),
+            Paragraph::new(Span::styled(tr(app.lang, Key::NoFiles), Style::default().fg(p.dim)))
+                .wrap(Wrap { trim: true }),
             inner,
         );
         return;
     };
-    // Ust: detaylar · Alt: bitrate & verim tablosu
-    let table_h = (app.files.len() as u16 + 3).clamp(4, 10);
+    // Ust: detaylar · Alt: bitrate & verim tablosu (oransal)
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(5), Constraint::Length(table_h)])
+        .constraints([
+            Constraint::Percentage(58), // detaylar
+            Constraint::Percentage(42), // verim tablosu
+        ])
         .split(inner);
 
     let l = app.lang;
@@ -596,7 +670,7 @@ fn draw_details(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
         lines.push(Line::from(Span::styled(format!("  {e}"), Style::default().fg(p.dim))));
     }
     f.render_widget(
-        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }),
+        Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }),
         chunks[0],
     );
     render_eff_table(f, app, p, chunks[1]);
@@ -642,7 +716,7 @@ fn draw_help_block(f: &mut Frame, p: &Palette, area: Rect) {
         Line::from(Span::styled("c  donustur", Style::default().fg(p.dim))),
         Line::from(Span::styled("?  tum kisayollar", Style::default().fg(p.dim))),
     ]);
-    f.render_widget(Paragraph::new(txt).block(block), area);
+    f.render_widget(Paragraph::new(txt).wrap(Wrap { trim: true }).block(block), area);
 }
 
 // ---------------------------------------------------------------------------
@@ -674,7 +748,8 @@ fn draw_queue(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
             Paragraph::new(Span::styled(
                 format!("  {}", tr(app.lang, Key::QueueEmpty)),
                 Style::default().fg(p.dim),
-            )),
+            ))
+            .wrap(Wrap { trim: true }),
             inner,
         );
         return;
@@ -709,7 +784,7 @@ fn draw_queue(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
             Span::styled(label, style),
         ]));
     }
-    f.render_widget(Paragraph::new(Text::from(lines)), inner);
+    f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), inner);
 }
 
 fn draw_log(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
@@ -733,12 +808,68 @@ fn draw_log(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
             ))
         })
         .collect();
-    f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }), inner);
+    f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), inner);
 }
 
 // ---------------------------------------------------------------------------
 // Popuplar
 // ---------------------------------------------------------------------------
+
+/// Termux depolama izni yok: arayuz yerine NET Turkce yonlendirme ekrani.
+///
+/// Ham OS hatasi (Permission denied / os error 13) asla gosterilmez;
+/// mesaj `storage::health()`ten gelir (adim adim ne yapilacagini soyler).
+fn draw_storage_error(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
+    let Some(msg) = &app.storage_error else {
+        return;
+    };
+    let blok = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(p.err))
+        .style(if p.plain {
+            Style::default()
+        } else {
+            Style::default().bg(p.bg)
+        })
+        .title(format!(" {} ", tr(app.lang, Key::StorageTitle)));
+    let inner = blok.inner(area);
+    f.render_widget(blok, area);
+
+    let mut lines: Vec<Line> = msg
+        .lines()
+        .map(|s| Line::from(Span::styled(s.to_string(), Style::default().fg(p.fg))))
+        .collect();
+    lines.push(Line::from(""));
+    lines.push(Line::from(Span::styled(
+        tr(app.lang, Key::PressToRetry),
+        Style::default().fg(p.warn).add_modifier(Modifier::BOLD),
+    )));
+
+    // dikeyde ortala, tasma yok
+    let h = (lines.len() as u16).min(inner.height);
+    let y = inner.y + inner.height.saturating_sub(h) / 2;
+    f.render_widget(
+        Paragraph::new(Text::from(lines))
+            .alignment(ratatui::layout::Alignment::Center)
+            .wrap(Wrap { trim: true }),
+        Rect {
+            x: inner.x + 1.min(inner.width),
+            y,
+            width: inner.width.saturating_sub(2),
+            height: h,
+        },
+    );
+}
+
+/// Yuzdeye gore ama min/max sinirli kutu: kucuk terminalde de tasmaz.
+pub fn pct(area: Rect, yuzde: u16, min: u16, max: u16) -> u16 {
+    ((area.width as u32 * yuzde as u32 / 100) as u16).clamp(min, max).min(area.width)
+}
+
+/// Yukseklik icin ayni mantik (satir sayisina gore de sinirlanabilir).
+pub fn pct_h(area: Rect, yuzde: u16, min: u16, max: u16) -> u16 {
+    ((area.height as u32 * yuzde as u32 / 100) as u16).clamp(min, max).min(area.height)
+}
 
 fn centered(area: Rect, w: u16, h: u16) -> Rect {
     let w = w.min(area.width);
@@ -752,7 +883,8 @@ fn centered(area: Rect, w: u16, h: u16) -> Rect {
 }
 
 fn draw_preset_popup(f: &mut Frame, app: &App, p: &Palette) {
-    let area = centered(f.area(), 68, (Preset::ALL.len() as u16 + 4).min(f.area().height));
+    let h = (Preset::ALL.len() as u16 + 4).min(pct_h(f.area(), 80, 6, f.area().height));
+    let area = centered(f.area(), pct(f.area(), 72, 30, 68), h);
     f.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -794,7 +926,7 @@ fn draw_preset_popup(f: &mut Frame, app: &App, p: &Palette) {
 }
 
 fn draw_settings_popup(f: &mut Frame, app: &App, p: &Palette) {
-    let area = centered(f.area(), 66, 16);
+    let area = centered(f.area(), pct(f.area(), 70, 34, 66), pct_h(f.area(), 70, 8, 16));
     f.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -839,7 +971,7 @@ fn draw_settings_popup(f: &mut Frame, app: &App, p: &Palette) {
         "  ↑↓ alan · ←→ degistir · Enter uygula · Esc kapat",
         Style::default().fg(p.dim),
     )));
-    f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: false }), inner);
+    f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), inner);
 }
 
 fn config_hint(app: &App) -> String {
@@ -853,7 +985,7 @@ fn config_hint(app: &App) -> String {
 }
 
 fn draw_help_popup(f: &mut Frame, app: &App, p: &Palette) {
-    let area = centered(f.area(), 74, 22);
+    let area = centered(f.area(), pct(f.area(), 76, 34, 74), pct_h(f.area(), 86, 8, 22));
     f.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -893,7 +1025,7 @@ fn draw_help_popup(f: &mut Frame, app: &App, p: &Palette) {
         "  Esc ile kapat",
         Style::default().fg(p.dim),
     )));
-    f.render_widget(Paragraph::new(Text::from(lines)), inner);
+    f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), inner);
 }
 
 fn draw_input_popup(f: &mut Frame, app: &App, p: &Palette) {
@@ -904,7 +1036,7 @@ fn draw_input_popup(f: &mut Frame, app: &App, p: &Palette) {
         crate::app::InputTarget::TrimEnd => tr(app.lang, Key::TrimEnd),
         crate::app::InputTarget::MergeName => tr(app.lang, Key::MergeNameLabel),
     };
-    let area = centered(f.area(), 70, 5);
+    let area = centered(f.area(), pct(f.area(), 74, 30, 70), pct_h(f.area(), 30, 4, 5));
     f.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -923,11 +1055,11 @@ fn draw_input_popup(f: &mut Frame, app: &App, p: &Palette) {
             Style::default().fg(p.dim),
         )),
     ]);
-    f.render_widget(Paragraph::new(txt).wrap(Wrap { trim: false }), inner);
+    f.render_widget(Paragraph::new(txt).wrap(Wrap { trim: true }), inner);
 }
 
 fn draw_quit_popup(f: &mut Frame, app: &App, p: &Palette) {
-    let area = centered(f.area(), 50, 5);
+    let area = centered(f.area(), pct(f.area(), 60, 26, 50), pct_h(f.area(), 30, 4, 5));
     f.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -941,7 +1073,7 @@ fn draw_quit_popup(f: &mut Frame, app: &App, p: &Palette) {
         "Cikilsin mi?  e / h"
     };
     f.render_widget(
-        Paragraph::new(Span::styled(msg, Style::default().fg(p.fg))).wrap(Wrap { trim: false }),
+        Paragraph::new(Span::styled(msg, Style::default().fg(p.fg))).wrap(Wrap { trim: true }),
         inner,
     );
 }
@@ -956,9 +1088,9 @@ fn draw_browse(f: &mut Frame, app: &mut App, p: &Palette) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(3),
-            Constraint::Min(5),
-            Constraint::Length(2),
+            Constraint::Percentage(12), // yol + mod
+            Constraint::Min(3),         // liste (esneyen)
+            Constraint::Percentage(10), // ipucu
         ])
         .split(area);
 
@@ -980,12 +1112,14 @@ fn draw_browse(f: &mut Frame, app: &mut App, p: &Palette) {
             Style::default().fg(p.warn),
         ),
     ]))
+    .wrap(Wrap { trim: true })
     .block(Block::default().borders(Borders::ALL));
     f.render_widget(head, chunks[0]);
 
     if let Some(e) = &b.error {
         f.render_widget(
             Paragraph::new(Span::styled(e.clone(), Style::default().fg(p.err)))
+                .wrap(Wrap { trim: true })
                 .block(Block::default().borders(Borders::ALL).title(" Hata ")),
             chunks[1],
         );
@@ -1043,7 +1177,8 @@ fn draw_browse(f: &mut Frame, app: &mut App, p: &Palette) {
                 format!("hizli klasorler: {quick}"),
                 Style::default().fg(p.dim),
             )),
-        ]),
+        ])
+        .wrap(Wrap { trim: true }),
         chunks[2],
     );
 }
@@ -1076,6 +1211,68 @@ pub fn render_eff_table<'a>(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// KABUL KRITERI: hangi boyutta olursa olsun hicbir panel alanin
+    /// DISINA cikmaz ve paneller ust uste binmez (toplam = tam yukseklik).
+    #[test]
+    fn layout_hicbir_boyutta_tasmaz() {
+        for (w, h) in [
+            (20u16, 8u16), (24, 10), (30, 12), (40, 16), (60, 20),
+            (80, 24), (100, 30), (120, 40), (160, 60), (200, 80),
+            (21, 9), (20, 40), (200, 8), (119, 23),
+        ] {
+            let area = Rect::new(0, 0, w, h);
+            let chunks = main_layout(area);
+            let toplam: u16 = chunks.iter().map(|c| c.height).sum();
+            assert_eq!(
+                toplam, h,
+                "{w}x{h}: panellerin toplami alan yuksekligine esit olmali"
+            );
+            let mut beklenen_y = 0;
+            for (i, c) in chunks.iter().enumerate() {
+                assert!(c.x >= area.x && c.y >= area.y, "{w}x{h}: panel {i} alan disinda");
+                assert!(
+                    c.x + c.width <= area.x + area.width,
+                    "{w}x{h}: panel {i} saga tasti"
+                );
+                assert!(
+                    c.y + c.height <= area.y + area.height,
+                    "{w}x{h}: panel {i} asagi tasti"
+                );
+                assert_eq!(c.y, beklenen_y, "{w}x{h}: panel {i} bosluk/ust uste binme");
+                beklenen_y += c.height;
+            }
+            // govde her zaman gorunur bir panel kalmali
+            assert!(chunks[1].height >= 3, "{w}x{h}: govde icin yer kalmadi");
+        }
+    }
+
+    /// Kucuk terminal esigi: bu boyutlarin altinda normal arayuz cizilmez.
+    #[test]
+    fn kucuk_terminal_esigi() {
+        assert!(MIN_COLS >= 20 && MIN_ROWS >= 8);
+        // esik civari: kabul edilen boyutlarda govde yine de pozitif
+        for (w, h) in [(MIN_COLS, MIN_ROWS), (MIN_COLS, MIN_ROWS + 1), (MIN_COLS + 1, MIN_ROWS)] {
+            let c = main_layout(Rect::new(0, 0, w, h));
+            assert!(c[1].height >= 3, "{w}x{h}");
+        }
+    }
+
+    /// Popup olculeri (pct) alani asmaz.
+    #[test]
+    fn popup_olculeri_tasmaz() {
+        for (w, h) in [(20u16, 8u16), (40, 12), (80, 24), (120, 40)] {
+            let area = Rect::new(0, 0, w, h);
+            for yuzde in [30u16, 60, 72, 76] {
+                let pw = pct(area, yuzde, 26, 74);
+                assert!(pw <= w, "{w}x{h}: popup genisligi tasti");
+            }
+            for yuzde in [30u16, 70, 80, 86] {
+                let ph = pct_h(area, yuzde, 4, 22);
+                assert!(ph <= h, "{w}x{h}: popup yuksekligi tasti");
+            }
+        }
+    }
 
     #[test]
     fn pencere_hesabi_sinirlari() {

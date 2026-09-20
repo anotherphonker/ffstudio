@@ -22,8 +22,10 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// (Termux'ta ffmpeg/ffprobe uzantisiz olur: `pkg install ffmpeg`.)
 pub const EXE: &str = if cfg!(windows) { ".exe" } else { "" };
 
-#[cfg(embed_ffmpeg)]
-const EMBEDDED_ZIP: &[u8] = include_bytes!("../ffmpeg.zip");
+#[cfg(feature = "embed-ffmpeg")]
+// Yol, BU DOSYANIN bulundugu dizine gore cozulur: core/src/ -> ../../ffmpeg.zip
+// = workspace koku (core/build.rs da ayni dosyayi kontrol eder).
+const EMBEDDED_ZIP: &[u8] = include_bytes!("../../ffmpeg.zip");
 
 // ---------------------------------------------------------------------------
 // Binary yonetimi
@@ -42,7 +44,7 @@ impl Ffmpeg {
     ///          2) exe yanında  3) PATH
     pub fn locate(lang: Lang) -> Result<Self> {
         // 1) gomulu
-        #[cfg(embed_ffmpeg)]
+        #[cfg(feature = "embed-ffmpeg")]
         if let Some(dir) = data_dir() {
             let bin = dir.join("ffmpeg");
             let ff = bin.join(format!("ffmpeg{EXE}"));
@@ -111,7 +113,7 @@ impl Ffmpeg {
     }
 }
 
-#[cfg_attr(not(embed_ffmpeg), allow(dead_code))]
+#[cfg_attr(not(feature = "embed-ffmpeg"), allow(dead_code))]
 fn data_dir() -> Option<PathBuf> {
     dirs::data_local_dir().map(|d| d.join("ffstudio"))
 }
@@ -133,10 +135,10 @@ fn find_in_path(bin: &str) -> Option<PathBuf> {
 }
 
 /// Gomulu zipten sadece ffmpeg.exe + ffprobe.exe cikarir (doc/license atlanir).
-#[cfg_attr(not(embed_ffmpeg), allow(dead_code))]
-#[cfg(feature = "embed_ffmpeg")]
-#[allow(dead_code)] // feature acik ama ffmpeg.zip yoksa (embed_ffmpeg cfg kapali) kullanilmaz
-fn extract_zip(bytes: &[u8], target: &Path) -> Result<()> {
+#[cfg_attr(not(feature = "embed-ffmpeg"), allow(dead_code))]
+#[cfg(feature = "embed-ffmpeg")]
+#[allow(dead_code)] // zip yoksa cagrilmaz
+pub fn extract_zip(bytes: &[u8], target: &Path) -> Result<()> {
     use std::io::Cursor;
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).context("zip açılamadı")?;
     let mut found_ff = false;
@@ -701,6 +703,87 @@ fn run_one(ffmpeg: &Path, job: &JobSpec, tx: &mpsc::Sender<JobMsg>) -> (bool, St
         }
     };
     (ok, msg, out_size)
+}
+
+/// ffmpeg.zip icinden cikarma testleri.
+///
+/// Bu testler ONEMLI: `include_bytes!` yolunun workspace kokunu gostermesi
+/// ve zip icindeki armut/havuz klasorlerinin taranmasi refactor'da kirilmisti.
+#[cfg(all(test, feature = "embed-ffmpeg"))]
+mod zip_tests {
+    use super::*;
+    use std::io::Write;
+
+    fn gecici(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("ffstudio_zip_{}_{}", std::process::id(), tag));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn zip_uret(icerik: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        {
+            let mut w = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let opts = zip::write::FileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+            for (ad, veri) in icerik {
+                w.start_file(*ad, opts).unwrap();
+                w.write_all(veri).unwrap();
+            }
+            w.finish().unwrap();
+        }
+        buf
+    }
+
+    /// Alt klasordeki (ffmpeg-7/bin/...) binary'ler bulunup hedefe cikarilmali,
+    /// ilgisiz dosyalar kopyalanmamali.
+    /// (Adlar platforma gore: Windows'ta .exe, Linux/Termux'ta uzantisiz.)
+    #[test]
+    fn alt_klasorden_cikarir() {
+        let d = gecici("alt");
+        let ff = format!("ffmpeg{EXE}");
+        let fp = format!("ffprobe{EXE}");
+        let zip = zip_uret(&[
+            (&format!("ffmpeg-7.1/bin/{ff}"), b"MZFFMPEG"),
+            (&format!("ffmpeg-7.1/bin/{fp}"), b"MZFFPROBE"),
+            ("ffmpeg-7.1/README.txt", b"kopyalanmamali"),
+        ]);
+        extract_zip(&zip, &d).expect("cikarma basarisiz");
+        assert_eq!(fs::read(d.join(&ff)).unwrap(), b"MZFFMPEG");
+        assert_eq!(fs::read(d.join(&fp)).unwrap(), b"MZFFPROBE");
+        assert!(!d.join("README.txt").exists(), "ilgisiz dosya kopyalanmamali");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// ffprobe yoksa hata vermeli (sessizce yarim kurulum yapmamali).
+    #[test]
+    fn eksik_binary_hata_verir() {
+        let d = gecici("eksik");
+        let ff = format!("ffmpeg{EXE}");
+        let zip = zip_uret(&[(&ff, b"MZFFMPEG")]);
+        assert!(extract_zip(&zip, &d).is_err(), "ffprobe yoksa hata beklenir");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// Zip bozuksa panik degil, anlasilir hata dondurmeli.
+    #[test]
+    fn bozuk_zip_hata_dondurur() {
+        let d = gecici("bozuk");
+        assert!(extract_zip(b"bu bir zip degil", &d).is_err());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    /// GOMULU zip gercekten binary'nin icine girmis mi (include_bytes yolu).
+    ///
+    /// Bu test yalnizca ffmpeg.zip DERLEME ANINDA varsa calisir; zip yoksa
+    /// "embed-ffmpeg" feature'i kapali oldugu icin EMBEDDED_ZIP tanimli olmaz.
+    #[cfg(feature = "embed-ffmpeg")]
+    #[test]
+    fn gomulu_zip_okunabilir() {
+        assert!(EMBEDDED_ZIP.len() > 32, "gomulu zip cok kucuk");
+        assert_eq!(&EMBEDDED_ZIP[..2], b"PK", "gomulu veri zip imzasi tasimali");
+    }
 }
 
 #[cfg(any(test, feature = "testutil"))]

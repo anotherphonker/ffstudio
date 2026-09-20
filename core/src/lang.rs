@@ -23,7 +23,7 @@ impl Lang {
 }
 
 // Bazi anahtarlar yalnizca belirli platform/derleme senaryolarinda kullanilir
-// (orn: SrcEmbedded sadece embed_ffmpeg'de); dead-code uyarisini kilitle.
+// (orn: SrcEmbedded sadece 'embed-ffmpeg' feature'inda); dead-code uyarisini kilitle.
 #[allow(dead_code)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Key {
@@ -82,6 +82,10 @@ pub enum Key {
     DAudioRate,
     DSizeLabel,
     CmdPreviewSel,
+    StorageOk,
+    StorageTitle,
+    TooSmallTitle,
+    PressToRetry,
     LabelSrcAction,
     SrcKeep,
     SrcDelete,
@@ -449,6 +453,22 @@ pub fn tr(lang: Lang, k: Key) -> &'static str {
         Key::DAudioRate => match lang {
             Lang::Tr => "Ornekleme",
             Lang::En => "Sample rate",
+        },
+        Key::StorageOk => match lang {
+            Lang::Tr => "[Depolama] izin verildi: /sdcard erisilebilir.",
+            Lang::En => "[Storage] permission granted: /sdcard is accessible.",
+        },
+        Key::StorageTitle => match lang {
+            Lang::Tr => "Depolama izni gerekli",
+            Lang::En => "Storage permission required",
+        },
+        Key::TooSmallTitle => match lang {
+            Lang::Tr => "Terminal cok kucuk",
+            Lang::En => "Terminal too small",
+        },
+        Key::PressToRetry => match lang {
+            Lang::Tr => "r: tekrar dene (izin verdikten sonra)   q: cikis",
+            Lang::En => "r: retry (after granting)   q: quit",
         },
         Key::CmdPreviewSel => match lang {
             Lang::Tr => "Komut önizlemesi (seçili dosya)",

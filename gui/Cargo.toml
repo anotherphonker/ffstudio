@@ -14,14 +14,14 @@ name = "ffstudio"
 path = "src/main.rs"
 
 [dependencies]
-ffstudio_core = { package = "core", path = "../core", features = ["embed_ffmpeg"] }
+ffstudio_core = { package = "core", path = "../core", features = ["embed-ffmpeg"] }
 eframe = "=0.28.1"
 image = { version = "0.25", default-features = false, features = ["png"] }
 # Masaustu dosya secici (coklu dosya + klasor)
 rfd = "0.14"
 
 [dev-dependencies]
-ffstudio_core = { package = "core", path = "../core", features = ["embed_ffmpeg", "testutil"] }
+ffstudio_core = { package = "core", path = "../core", features = ["embed-ffmpeg", "testutil"] }
 
 [build-dependencies]
 # Windows exe ikonu + surum bilgisi (Gezgin/taskbar) gomme

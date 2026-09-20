@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
 members = ["core", "gui", "tui"]
+# Cargo, ayni build icinde paylasilan bagimliligin (core) feature'larini
+# BIRLESTIRIR. Yani "cargo build --release" ile gui+tui birlikte derlenirse
+# gui'nin actigi "embed-ffmpeg" tui'ye de bulasir ve tui binary'sine
+# ffmpeg.zip gomulur (sisirir). Bunu engellemek icin varsayilan uye GUI:
+# TUI'yi her zaman ACIKCA derle ->  cargo build --release -p tui
+default-members = ["gui"]
 
 [workspace.package]
 version = "0.1.0"

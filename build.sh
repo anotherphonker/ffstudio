@@ -56,6 +56,26 @@ install_shortcut() {
     fi
 }
 
+# Termux: depolama izni verilmemisse gezici /sdcard'i goremez -> simdi iste
+# NOT: termux-setup-storage, kullanici izin vermezse hata kodu ile donebilir.
+# set -e yuzunden betik yarida kesilmesin (kisayol yine kurulsun) diye bu blok
+# boyunca set -e kapatilir; asagidaki satirlar aynen korunur.
+set +e
+if [ -n "$TERMUX_VERSION" ] && [ ! -d "$HOME/storage/shared" ]; then
+    echo "Depolama izni henüz verilmemiş."
+    echo "Şimdi izin isteği açılacak, ekrandaki dialogda 'İzin ver'e bas."
+    termux-setup-storage
+    # Android izin dialogu asenkron açılıyor, sembolik link oluşana kadar bekle
+    for i in $(seq 1 10); do
+        [ -d "$HOME/storage/shared" ] && break
+        sleep 1
+    done
+    if [ ! -d "$HOME/storage/shared" ]; then
+        echo "UYARI: İzin verilmedi ya da zaman aşımı. Manuel çalıştır: termux-setup-storage"
+    fi
+fi
+set -e
+
 install_shortcut
 
 # build.bat run modunun karşılığı: ./build.sh run

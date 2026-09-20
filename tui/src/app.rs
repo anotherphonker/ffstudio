@@ -109,6 +109,9 @@ pub struct App {
 
     /// NO_COLOR ortam degiskeni doluysa renkler kapanir (standart konvansiyon).
     pub no_color: bool,
+    /// Termux depolama izni yoksa net Turkce mesaj; varsa `None`.
+    /// Bu alan doluyken arayuz yerine hata ekrani cizilir.
+    pub storage_error: Option<String>,
     pub mode: Mode,
     pub focus: Focus,
     pub browse: Option<Browse>,
@@ -149,6 +152,7 @@ impl App {
             no_color: std::env::var_os("NO_COLOR")
                 .map(|v| !v.is_empty())
                 .unwrap_or(false),
+            storage_error: crate::storage::health(lang),
             mode: Mode::Main,
             focus: Focus::Files,
             browse: None,
@@ -195,6 +199,12 @@ impl App {
     /// dosyaysa dogrudan kuyruga alir.
     pub fn add_path(&mut self, p: &Path) {
         if p.is_dir() {
+            // okunamayan klasor: ham OS hatasi degil, dostu mesaj
+            if let Err(e) = std::fs::read_dir(p) {
+                let m = crate::errors::dir_error(p, &e, self.lang);
+                self.push_log(m, true);
+                return;
+            }
             let mut found = Vec::new();
             util::walk(p, &mut found);
             self.push_log(
@@ -244,7 +254,11 @@ impl App {
                     .map(|s| s.to_string_lossy().to_string())
                     .unwrap_or_else(|| p.display().to_string());
                 self.push_log(
-                    format!("{} {name}: {e}", tr(self.lang, Key::LogSkippedFile)),
+                    format!(
+                        "{} {name}: {}",
+                        tr(self.lang, Key::LogSkippedFile),
+                        crate::errors::map_text(&e.to_string(), self.lang)
+                    ),
                     true,
                 );
             }
@@ -260,6 +274,7 @@ impl App {
     // ------------------------------------------------------------------
 
     pub fn open_browse(&mut self, mode: PickMode) {
+        // Termux'ta varsayilan: ~/storage/shared/Music -> ~/storage/shared -> home
         let start = match mode {
             PickMode::OutDir => match &self.settings.out_mode {
                 OutMode::Dir(d) => Some(d.clone()),
@@ -268,7 +283,9 @@ impl App {
             PickMode::MoveDir => self.settings.src_move_dir.clone(),
             _ => self.files.first().and_then(|m| m.path.parent().map(|p| p.to_path_buf())),
         };
-        self.browse = Some(Browse::new(mode, start));
+        let mut b = Browse::new(mode, start);
+        b.lang = self.lang; // hata mesajlari secili dilde
+        self.browse = Some(b);
         self.mode = Mode::Browse;
     }
 
@@ -324,6 +341,21 @@ impl App {
     // ------------------------------------------------------------------
     // Komut uretimi: ONIZLEME ve CALISTIRMA ayni kaynaktan
     // ------------------------------------------------------------------
+
+    /// Depolama iznini yeniden kontrol et ('r' tusu): izin sonradan
+    /// verildiyse hata ekrani kalkar, gezici /sdcard'a baglanir.
+    pub fn recheck_storage(&mut self) {
+        let onceki = self.storage_error.is_some();
+        self.storage_error = crate::storage::health(self.lang);
+        match (&self.storage_error, onceki) {
+            (None, true) => {
+                let l = self.lang;
+                self.push_log(tr(l, Key::StorageOk).to_string(), false);
+            }
+            (Some(_), _) => {}
+            (None, false) => {}
+        }
+    }
 
     /// Bu dosya icin is spesifikasyonunu uret (skip dahil).
     /// Onizleme komutu DA bu fonksiyondan turer; boylece ekranda gorunen

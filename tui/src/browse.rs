@@ -28,6 +28,8 @@ pub struct Entry {
 
 pub struct Browse {
     pub mode: PickMode,
+    /// Arayuz dili (hata mesajlari icin)
+    pub lang: ffstudio_core::lang::Lang,
     pub cur: PathBuf,
     pub entries: Vec<Entry>,
     pub sel: usize,
@@ -38,12 +40,15 @@ pub struct Browse {
 impl Browse {
     /// Geziciyi baslat: baslangic klasoru verilmezse ev dizini (yoksa "/").
     pub fn new(mode: PickMode, start: Option<PathBuf>) -> Self {
+        // Varsayilan: Termux'ta ~/storage/shared/Music -> ~/storage/shared -> home
+        // (masaustunde indirilenler -> home). Kullaniciya /storage/emulated/0
+        // yolunu elle yazdirmayiz.
         let cur = start
             .filter(|p| p.is_dir())
-            .or_else(|| dirs::home_dir().filter(|p| p.is_dir()))
-            .unwrap_or_else(|| PathBuf::from("/"));
+            .unwrap_or_else(crate::storage::default_start);
         let mut b = Browse {
             mode,
+            lang: ffstudio_core::lang::Lang::Tr,
             cur: cur.clone(),
             entries: Vec::new(),
             sel: 0,
@@ -60,7 +65,8 @@ impl Browse {
         let rd = match std::fs::read_dir(&self.cur) {
             Ok(rd) => rd,
             Err(e) => {
-                self.error = Some(format!("{}: {e}", self.cur.display()));
+                // ham OS metni ("Permission denied (os error 13)") gosterilmez
+                self.error = Some(crate::errors::dir_error(&self.cur, &e, self.lang));
                 self.entries.clear();
                 self.sel = 0;
                 return;
@@ -208,6 +214,18 @@ pub enum PickResult {
 /// Gezici icin makul baslangic klasorleri (Termux + masaustu).
 pub fn quick_starts() -> Vec<(&'static str, PathBuf)> {
     let mut v: Vec<(&'static str, PathBuf)> = Vec::new();
+    // Termux: ~/storage/shared (+ Music) once gelir
+    if let Some(shared) = crate::storage::shared_dir() {
+        v.push(("Depolama", shared.clone()));
+        let music = shared.join("Music");
+        if music.is_dir() {
+            v.push(("Music", music));
+        }
+        let movies = shared.join("Movies");
+        if movies.is_dir() {
+            v.push(("Movies", movies));
+        }
+    }
     if let Some(h) = dirs::home_dir() {
         v.push(("~", h.clone()));
     }

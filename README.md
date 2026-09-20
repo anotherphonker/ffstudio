@@ -136,7 +136,8 @@ cargo build --release -p gui
 Exe: `target\release\ffstudio.exe`
 
 > Bu depo bir **Cargo workspace**'tir: `core` (ortak mantık), `gui` (Windows arayüzü), `tui` (Termux).
-> Kökte `cargo build --release` dersen üçü birden derlenir; sadece istediğini `-p <ad>` ile seçebilirsin.
+> Kökte `cargo build --release` (paket belirtmeden) **yalnızca GUI'yi** derler — çünkü workspace'in
+> `default-members`'i `gui`. TUI'yi derlemek için `-p tui` yaz (bkz. "Derleme (Termux TUI)").
 
 Derle + çalıştır: `build.bat run`
 
@@ -153,6 +154,9 @@ Termux'ta çalıştırmak için:
 1. `pkg install rust ffmpeg termux-api`
 2. Repoyu klonla, kökte `./build.sh` çalıştır
 3. Binary: `target/release/tui`
+
+> `./build.sh: Permission denied` derse (zip'ten indirildiyse izinler düşebilir):
+> `chmod +x build.sh` — ya da doğrudan `sh build.sh` yaz.
 
 Derle + çalıştır: `./build.sh run`
 
@@ -182,6 +186,33 @@ ikonu olarak ekleyebilirsin.
 Varsayılan: **koyu mod + mavi vurgu** (`#5B9DFF`), Türkçe, %125 yazı boyutu, **Otomatik paralellik**.
 Seçim `%LOCALAPPDATA%\eframe\FF Studio\eframe.conf.json` içine kaydedilir;
 uygulama yeniden açılınca aynen geri gelir.
+
+## ffmpeg kaynağı ve `embed-ffmpeg` feature'ı
+
+Gömme (embed) yeteneği **Cargo feature'ı** ile kontrol edilir:
+
+| Crate | `embed-ffmpeg` | Sonuç |
+|---|---|---|
+| `gui` | **açık** (`gui/Cargo.toml` → `features = ["embed-ffmpeg"]`) | `ffmpeg.zip` binary'ye gömülür (all-in-one) |
+| `tui` | **kapalı** | zip hiç aranmaz; ffmpeg PATH'ten (Termux: `pkg install ffmpeg`) |
+| `core` (tek başına) | kapalı | zip aramaz — `cargo build -p core` her yerde çalışır |
+
+Bu yüzden:
+
+- **`ffmpeg.zip` repo kökünde durur** (`.gitignore` onu bilerek dışlamaz). Dosyayı repo'dan
+  silme: `gui` derlemesi onu ister.
+- `ffmpeg.zip` yoksa: **TUI** yine sorunsuz derlenir; **GUI** derlemesi hata verir (gömme zorunlu).
+  Bu durumda ya zip'i köke koy, ya da gömmeden derlemek yerine TUI'yi kullan.
+- **Neden `-p` ile derliyoruz:** Cargo, tek bir build içinde paylaşılan bağımlılığın (`core`)
+  feature'larını **birleştirir**. Yani `gui` ile `tui` aynı komutla derlenirse `gui`'nin açtığı
+  `embed-ffmpeg` `tui`'ye de bulaşır ve TUI binary'sine de zip gömülür (binary şişer; ölçtüm:
+  1.45 MB → 113 MB'lık zip ile ~115 MB). Bunu kökten engellemek için workspace'te
+  **`default-members = ["gui"]`**: paket belirtmeden `cargo build` sadece GUI'yi derler, TUI
+  yalnızca `-p tui` ile üretilir ve **asla** zip taşımaz. `build.bat`/`build.sh` de böyle yapar.
+
+Doğrulama (repo kökünde `ffmpeg.zip` dururken): `cargo build --release -p gui` → binary'de zip
+girdileri görünür (gömüldü); `cargo build --release -p tui` → TUI binary'sinde zip **yok**
+(1.4 MB kalır) ve zip olmadan da sorunsuz derlenir.
 
 ## ffmpeg (all-in-one) — 3 seçenek
 
@@ -229,13 +260,14 @@ ffstudio/                 # Cargo workspace
   build.sh                # Termux/Linux TUI derleme (./build.sh  |  ./build.sh run)
   upload_github.bat       # tek komutla GitHub'a yükleme (yerel kalır; repo'ya girmez)
   .gitignore              # target/ ve *.exe git'e girmez; ffmpeg.zip REPODA
-  ffmpeg.zip              # gömülü ffmpeg (all-in-one build girdisi)
+  ffmpeg.zip              # gömülü ffmpeg (all-in-one GUI build girdisi; REPODA kalir)
 
   core/                   # ORTAK MANTIK (GUI + TUI aynı kodu çağırır)
     Cargo.toml            # lib adı: ffstudio_core
-    build.rs              # ffmpeg.zip varsa embed_ffmpeg cfg'ini açar
+    build.rs              # embed-ffmpeg feature'i acikken ffmpeg.zip'i kontrol eder + uyarir
     src/
       lib.rs              # modül listesi
+                          # features: embed-ffmpeg (GUI acar, TUI acmaz), testutil
       ffmpeg.rs           # binary bulma/gömülü çıkarma, ffprobe, PARALEL worker pool
       cpu.rs              # CPU algılama + paralellik planı (plan())
       profiles.rs         # tüm preset'ler, argüman üretimi, boyut tahmini

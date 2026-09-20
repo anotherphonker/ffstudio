@@ -10,9 +10,11 @@ name = "ffstudio_core"
 path = "src/lib.rs"
 
 [features]
-# ffmpeg.zip'i exe icine gomme yetenegi (yalnizca masaustu GUI kullanir;
-# TUI Termux'ta sistemi kurulu ffmpeg'i kullanir -> zip bagimliligi tasimaz).
-embed_ffmpeg = ["dep:zip"]
+# ffmpeg.zip'i binary icine gomme yetenegi.
+#   - GUI acar  : gui/Cargo.toml -> features = ["embed-ffmpeg"]
+#   - TUI ACMAZ : Termux'ta ffmpeg PATH'ten gelir, zip hic aranmaz
+# Yani TUI'yi derlerken ffmpeg.zip olmasa da hicbir sey bozulmaz.
+embed-ffmpeg = ["dep:zip"]
 # Test yardimcilari (yalnizca dev-dependency olarak acilir)
 testutil = []
 

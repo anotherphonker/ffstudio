@@ -13,6 +13,8 @@
 pub mod app;
 pub mod browse;
 pub mod config;
+pub mod errors;
+pub mod storage;
 pub mod ui;
 
 use std::io::{self, Stdout};
@@ -137,13 +139,27 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
             continue;
         }
         let ev = event::read()?;
-        if let Event::Key(k) = ev {
-            if k.kind != KeyEventKind::Press {
-                continue;
+        match ev {
+            // Terminal boyutu degisti (Termux'ta pinch-zoom ile font buyutme/
+            // kucultme de bunu tetikler). Bazi terminaller resize sonrasi ilk
+            // frame'de ESKI boyutu cache'te tutuyor; bu yuzden acikca temizleyip
+            // hemen yeniden ciziyoruz -> hicbir panel tasmaz/ust uste binmez.
+            Event::Resize(cols, rows) => {
+                if cols > 0 && rows > 0 {
+                    terminal.resize(ratatui::layout::Rect::new(0, 0, cols, rows))?;
+                }
+                terminal.clear()?;
+                terminal.draw(|f| crate::ui::draw(f, app))?;
             }
-            if handle_key(app, k) {
-                break;
+            Event::Key(k) => {
+                if k.kind != KeyEventKind::Press {
+                    continue;
+                }
+                if handle_key(app, k) {
+                    break;
+                }
             }
+            _ => {}
         }
     }
     Ok(())
@@ -151,6 +167,31 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
 
 /// true donerse uygulamadan cikilir.
 fn handle_key(app: &mut App, k: KeyEvent) -> bool {
+    // Termux depolama izni yoksa: arayuz yerine hata ekrani var.
+    // Sadece cikis / tekrar dene / dil / tema tuslari calisir.
+    if app.storage_error.is_some() {
+        match k.code {
+            KeyCode::Char('q') | KeyCode::Esc => return true,
+            KeyCode::Char('r') => app.recheck_storage(),
+            KeyCode::Char('l') => {
+                let l = if app.lang == Lang::Tr { Lang::En } else { Lang::Tr };
+                app.set_lang(l);
+                app.storage_error = crate::storage::health(app.lang);
+            }
+            KeyCode::Char('t') => {
+                let i = crate::config::Theme::ALL
+                    .iter()
+                    .position(|t| *t == app.theme)
+                    .unwrap_or(0);
+                app.theme = crate::config::Theme::ALL[(i + 1) % crate::config::Theme::ALL.len()];
+                app.settings.theme = app.theme;
+                app.settings.save();
+            }
+            _ => {}
+        }
+        return false;
+    }
+
     // Metin girisi modu: her seyi yutar
     if app.input.is_some() {
         match k.code {
