@@ -61,9 +61,9 @@ pkg install rust ffmpeg termux-api
 git clone https://github.com/anotherphonker/ffstudio
 cd ffstudio
 
-# TUI'yi derle (workspace üyelerinden biri)
-cargo build --release -p tui
-./target/release/ffstudio-tui
+# derle (ayrıntı: aşağıdaki "Derleme (Termux TUI)" bölümü)
+./build.sh
+./target/release/tui
 ```
 
 `termux-setup-storage` komutunu bir kere çalıştırırsan telefonun depolamasına (`/sdcard`) erişebilirsin.
@@ -138,6 +138,21 @@ Hızlı test için debug:
 cargo run -p gui
 ```
 
+## Derleme (Termux TUI)
+
+Termux'ta çalıştırmak için:
+
+1. `pkg install rust ffmpeg termux-api`
+2. Repoyu klonla, kökte `./build.sh` çalıştır
+3. Binary: `target/release/tui`
+
+Derle + çalıştır: `./build.sh run`
+
+Hızlı test için: `cargo run -p tui`
+
+TUI, Windows sürümünden farklı olarak ffmpeg'i **gömmez** — sistemde
+PATH'te bulunan ffmpeg'i kullanır (`pkg install ffmpeg` yeterli).
+
 ## Ayarlar (sağ üst)
 
 Üst barın sağında (en sağdan sola):
@@ -198,6 +213,7 @@ bu preset'ler için "CRF?" der; ses preset'lerinde tahmin = bitrate x süre (gay
 ffstudio/                 # Cargo workspace
   Cargo.toml              # [workspace] members = core, gui, tui
   build.bat               # Windows GUI derleme (cargo build --release -p gui)
+  build.sh                # Termux/Linux TUI derleme (./build.sh  |  ./build.sh run)
   upload_github.bat       # tek komutla GitHub'a yükleme (yerel kalır; repo'ya girmez)
   .gitignore              # target/ ve *.exe git'e girmez; ffmpeg.zip REPODA
   ffmpeg.zip              # gömülü ffmpeg (all-in-one build girdisi)
@@ -226,7 +242,7 @@ ffstudio/                 # Cargo workspace
       emoji.rs            # Twemoji PNG'lerini doku olarak yükler
 
   tui/                    # TERMUX / LINUX TUI (ratatui + crossterm)
-    Cargo.toml            # binary adı: ffstudio-tui
+    Cargo.toml            # binary adı: tui
     src/
       main.rs             # ince giriş noktası (wake-lock + çalıştır + wake-unlock)
       lib.rs              # terminal kurulumu, olay döngüsü, kısayollar

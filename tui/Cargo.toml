@@ -9,7 +9,7 @@ name = "ffstudio_tui"
 path = "src/lib.rs"
 
 [[bin]]
-name = "ffstudio-tui"
+name = "tui"
 path = "src/main.rs"
 
 [dependencies]
