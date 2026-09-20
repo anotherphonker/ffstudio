@@ -60,20 +60,6 @@ impl Ffmpeg {
             }
         }
 
-        // 1b) Android: asset'ten cikarilmis NDK ffmpeg/ffprobe (filesDir)
-        #[cfg(target_os = "android")]
-        if let Some(dir) = crate::android_ff::files_dir() {
-            let ff = dir.join("ffmpeg");
-            let fp = dir.join("ffprobe");
-            if ff.is_file() && fp.is_file() {
-                return Ok(Self {
-                    ffmpeg: ff,
-                    ffprobe: fp,
-                    source: tr(lang, Key::SrcEmbedded).to_string(),
-                });
-            }
-        }
-
         // 2) exe yanında (ffmpeg.exe veya ffmpeg/ffmpeg.exe)
         if let Ok(exe) = std::env::current_exe() {
             if let Some(d) = exe.parent() {

@@ -1,19 +1,14 @@
-// FF Studio — giris noktalari
+// FF Studio — giris noktasi (masaustu)
 //
-// Uygulamanin KODU BOLUMU src/lib.rs'te (ayni kod Android cdylib'ine de
-// giriyor). Bu dosya yalnizca isletim-sistemi giris noktasini baglar:
-//   - Masaustu: run_desktop()
-//   - Android:  .so icindeki `android_main` (lib.rs) — NativeActivity
-//               manifest'teki `android.app.lib_name` = "ffstudio" ile girer.
+// Uygulamanin KODU src/lib.rs'te (UI + is mantigi + testler).
+// Bu dosya yalnizca isletim sisteminin giris noktasini baglar: run_desktop().
+//
+// `windows_subsystem = "windows"` ONEMLI:
+//   Bu satir olmazsa exe KONSOL alt sistemiyle derlenir ve Windows, GUI
+//   penceresinin YANINDA bir de konsol (siyah cmd) penceresi acar —
+//   "cift pencere" problemi tam olarak buydu.
+#![windows_subsystem = "windows"]
 
-#[cfg(not(target_os = "android"))]
 fn main() -> eframe::Result<()> {
     ffstudio::run_desktop()
-}
-
-#[cfg(target_os = "android")]
-fn main() {
-    // Android'de bu binary calistirilmaz; giris noktası libffstudio.so
-    // icindeki android_main. Bu stub yalnizca crate'in derlenebilmesi icin.
-    std::process::exit(1);
 }

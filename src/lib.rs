@@ -1,5 +1,3 @@
-#![windows_subsystem = "windows"]
-
 // FF Studio - all-in-one ffmpeg GUI (Rust + egui)
 // Koyu mod, sürükle-bırak, sıralı dönüşüm kuyruğu, bitrate/verim tablosu,
 // detay paneli, komut önizlemesi, ffmpeg'i gömülü taşıma.
@@ -7,8 +5,6 @@
 mod cpu;
 mod emoji;
 mod ffmpeg;
-#[cfg(target_os = "android")]
-mod android_fs;
 mod lang;
 mod profiles;
 
@@ -113,9 +109,6 @@ struct App {
     running: bool,
     rx: Option<mpsc::Receiver<JobMsg>>,
     log: Vec<(String, bool)>,
-    /// Android dosya tarayicisi: Some((klasor, mod)
-    #[cfg(target_os = "android")]
-    picker: Option<(PathBuf, android_fs::PickMode)>,
 }
 
 impl App {
@@ -181,8 +174,6 @@ impl App {
             running: false,
             rx: None,
             log: Vec::new(),
-            #[cfg(target_os = "android")]
-            picker: None,
         };
         match &app.ff {
             Ok(f) => app.push_log(
@@ -239,8 +230,6 @@ impl App {
         self.central(ctx);
         self.settings_window(ctx);
         self.about_window(ctx);
-        #[cfg(target_os = "android")]
-        self.picker_window(ctx);
     }
 
     /// Headless test icin: ffmpeg'siz, dolu icerikli baslangic
@@ -454,202 +443,22 @@ impl App {
     }
 
     fn pick_files(&mut self) {
-        // Mobilde rfd yok (masaustu dosya secici); Android tarafinda
-        // SAF belgesi secici (Faz 4) — simdilik acik bir uyarilog.
-        #[cfg(not(target_os = "android"))]
-        {
-            let paths = rfd::FileDialog::new()
-                .set_title(tr(self.lang, Key::PickFilesTitle))
-                .pick_files()
-                .unwrap_or_default();
-            for p in &paths {
-                self.add_path(p);
-            }
-        }
-        #[cfg(target_os = "android")]
-        {
-            let root = android_fs::storage_root();
-            let dir = if root.join("Download").is_dir() {
-                root.join("Download")
-            } else {
-                root
-            };
-            self.picker = Some((dir, android_fs::PickMode::Files));
+        let paths = rfd::FileDialog::new()
+            .set_title(tr(self.lang, Key::PickFilesTitle))
+            .pick_files()
+            .unwrap_or_default();
+        for p in &paths {
+            self.add_path(p);
         }
     }
 
     fn pick_folder(&mut self) {
-        #[cfg(not(target_os = "android"))]
+        if let Some(d) = rfd::FileDialog::new()
+            .set_title(tr(self.lang, Key::PickFolderTitle))
+            .pick_folder()
         {
-            if let Some(d) = rfd::FileDialog::new()
-                .set_title(tr(self.lang, Key::PickFolderTitle))
-                .pick_folder()
-            {
-                self.add_path(&d);
-            }
+            self.add_path(&d);
         }
-        #[cfg(target_os = "android")]
-        {
-            let root = android_fs::storage_root();
-            let dir = if root.join("Download").is_dir() {
-                root.join("Download")
-            } else {
-                root
-            };
-            self.picker = Some((dir, android_fs::PickMode::Folder));
-        }
-    }
-
-    /// Android dosya tarayicisi (yerlesik; SAF yerine — bak android_fs.rs)
-    #[cfg(target_os = "android")]
-    fn picker_window(&mut self, ctx: &egui::Context) {
-        use android_fs::PickMode;
-        let Some((cur, mode)) = self.picker.as_ref().map(|(c, m)| (c.clone(), *m)) else {
-            return;
-        };
-        egui::Window::new("Dosya Sec")
-            .resizable(true)
-            .default_size([430.0, 540.0])
-            .min_size([300.0, 380.0])
-            .show(ctx, |ui| {
-                // ---- izin kapisi (her karede kontrol; ayarlardan donunce acilir)
-                if !android_fs::has_all_files() {
-                    ui.vertical_centered(|ui| {
-                        ui.add_space(10.0);
-                        ui.label(egui::RichText::new("Dosya erisi icin izin gerekli").strong());
-                        ui.add_space(4.0);
-                        ui.label(
-                            egui::RichText::new(
-                                "Asagidaki tusla acilan ayarlarda \"Tum dosyalara erisim\"\ni acip geri don — pencere otomatik acilir.",
-                            )
-                            .weak(),
-                        );
-                        ui.add_space(10.0);
-                        if ui.add_sized([160.0, 40.0], egui::Button::new("Ayarlara git")).clicked() {
-                            android_fs::request_all_files();
-                        }
-                        ui.add_space(8.0);
-                        if ui.button("Kapat").clicked() {
-                            self.picker = None;
-                        }
-                    });
-                    return;
-                }
-
-                // ---- hizli atlama
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("Hizli:").weak());
-                    for (label, p) in android_fs::quick_dirs() {
-                        if ui.small_button(label.clone()).clicked() {
-                            self.picker = Some((p, mode));
-                            return;
-                        }
-                    }
-                });
-                ui.separator();
-
-                // ---- mevcut yol (kisaltimli)
-                let s = cur.to_string_lossy().to_string();
-                let shown = if s.len() > 38 {
-                    format!("...{}", &s[s.len() - 35..])
-                } else {
-                    s
-                };
-                ui.label(egui::RichText::new(shown).monospace().size(10.5).weak());
-                ui.separator();
-
-                // ---- ust klasor
-                if let Some(parent) = cur.parent() {
-                    if parent != Path::new("/") {
-                        if ui.button("..  (ust klasor)").clicked() {
-                            self.picker = Some((parent.to_path_buf(), mode));
-                            return;
-                        }
-                    }
-                }
-
-                // ---- liste
-                egui::ScrollArea::vertical().max_height(330.0).show(ui, |ui| {
-                    match android_fs::list_dir(&cur) {
-                        Some(entries) => {
-                            if entries.is_empty() {
-                                ui.label(egui::RichText::new("Bu klasorde medya dosyasi yok.").weak());
-                            }
-                            for e in &entries {
-                                let p = cur.join(&e.name);
-                                let txt = if e.is_dir {
-                                    format!("{}/", e.name)
-                                } else {
-                                    let kb = if e.size >= 1_048_576 {
-                                        format!("{:.1} MB", e.size as f64 / 1_048_576.0)
-                                    } else {
-                                        format!("{} KB", e.size / 1024)
-                                    };
-                                    format!("{}   ({})", e.name, kb)
-                                };
-                                if ui.button(egui::RichText::new(txt).size(12.5)).clicked() {
-                                    if e.is_dir {
-                                        self.picker = Some((p, mode));
-                                    } else if mode == PickMode::Files {
-                                        self.add_path(&p);
-                                        // kapali kalsin: birden cok dosya secilebilsin
-                                    }
-                                    return;
-                                }
-                            }
-                        }
-                        None => {
-                            ui.label(
-                                egui::RichText::new("Klasor okunamadi.")
-                                    .color(egui::Color32::from_rgb(255, 120, 120)),
-                            );
-                        }
-                    }
-                });
-                ui.separator();
-
-                // ---- mod tuslari
-                ui.horizontal(|ui| {
-                    match mode {
-                        PickMode::Files => {
-                            if ui.button("Bu klasoru ekle").clicked() {
-                                self.add_path(&cur);
-                                self.picker = None;
-                            }
-                            if ui.small_button("Tamam (kap)").clicked() {
-                                self.picker = None;
-                            }
-                        }
-                        PickMode::Folder => {
-                            if ui.button("Bu klasoru ekle").clicked() {
-                                self.add_path(&cur);
-                                self.picker = None;
-                            }
-                            if ui.small_button("Vazgec").clicked() {
-                                self.picker = None;
-                            }
-                        }
-                        PickMode::OutDir => {
-                            if ui.button("Cikti klasoru yap").clicked() {
-                                self.out_mode = OutMode::Dir(cur);
-                                self.picker = None;
-                            }
-                            if ui.small_button("Vazgec").clicked() {
-                                self.picker = None;
-                            }
-                        }
-                        PickMode::MoveDir => {
-                            if ui.button("Tasinacak klasor yap").clicked() {
-                                self.src_move_dir = Some(cur);
-                                self.picker = None;
-                            }
-                            if ui.small_button("Vazgec").clicked() {
-                                self.picker = None;
-                            }
-                        }
-                    }
-                });
-            });
     }
 
     fn start_conversion(&mut self) {
@@ -1401,22 +1210,11 @@ impl App {
                             .selectable_value(&mut self.out_mode, OutMode::Dir(cur.clone()), tr(self.lang, Key::OutOther))
                             .clicked()
                         {
-                            #[cfg(not(target_os = "android"))]
                             if let Some(d) = rfd::FileDialog::new()
                                 .set_title(tr(self.lang, Key::PickOutFolder))
                                 .pick_folder()
                             {
                                 self.out_mode = OutMode::Dir(d);
-                            }
-                            #[cfg(target_os = "android")]
-                            {
-                                let root = android_fs::storage_root();
-                                let dir = if root.join("Download").is_dir() {
-                                    root.join("Download")
-                                } else {
-                                    root
-                                };
-                                self.picker = Some((dir, android_fs::PickMode::OutDir));
                             }
                         }
                         if let OutMode::Dir(d) = &self.out_mode {
@@ -1834,22 +1632,11 @@ impl App {
                     ui.label(egui::RichText::new(d.display().to_string()).monospace().size(11.0));
                 }
                 if ui.small_button(tr(lang, Key::OutOther)).clicked() {
-                    #[cfg(not(target_os = "android"))]
                     if let Some(d) = rfd::FileDialog::new()
                         .set_title(tr(lang, Key::PickSrcFolder))
                         .pick_folder()
                     {
                         self.src_move_dir = Some(d);
-                    }
-                    #[cfg(target_os = "android")]
-                    {
-                        let root = android_fs::storage_root();
-                        let dir = if root.join("Download").is_dir() {
-                            root.join("Download")
-                        } else {
-                            root
-                        };
-                        self.picker = Some((dir, android_fs::PickMode::MoveDir));
                     }
                 }
             }
@@ -2422,8 +2209,6 @@ fn logo_rgba() -> Option<(Vec<u8>, u32, u32)> {
 
 /// Pencere/taskbar ikonu: 256x256'ya kucult. (IconData boyutlarin
 /// 4'un katisi olmasini ister; orijinal 1254 degil.)
-/// Sadece masaustu — Android'de ikon APK manifest'inden (res/drawable).
-#[cfg(not(target_os = "android"))]
 fn logo_icon() -> Option<egui::IconData> {
     let img = image::load_from_memory(LOGO_PNG).ok()?.to_rgba8();
     let small = image::imageops::resize(&img, 256, 256, image::imageops::FilterType::Lanczos3);
@@ -2923,7 +2708,6 @@ mod tests {
     }
 }
 
-#[cfg(not(target_os = "android"))]
 pub fn run_desktop() -> eframe::Result<()> {
     // Taskbar/Alt-Tab ikonu = ayni embed logo
     let mut viewport = egui::ViewportBuilder::default()
@@ -2947,123 +2731,3 @@ pub fn run_desktop() -> eframe::Result<()> {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Android giris noktası (NativeActivity)
-// Manifest'teki `android.app.lib_name` = "ffstudio" oldugu icin Android,
-// libffstudio.so icinden `android_main` sembolunu arar. winit'in EventLoop'u
-// android_main ipligi uzerinde olusturulmak ZORUNDA; eframe::run_native bunu
-// ayni ipligede yapar (ayri thread acmaz).
-// ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// Android: NDK-derlenmis ffmpeg/ffprobe asset cikarma
-// build_apk.bat, android/ffmpeg-arm64.zip icerindeki ffmpeg + ffprobe
-// ikilisini APK'nin asset kismina paketler. Ilk baslangicta bunlari
-// filesDir'e cikarip calistirilabilir kiliyoruz (harici izin GEREKMEZ;
-// kendi dosya alanimizda calisiyorlar).
-// ---------------------------------------------------------------------------
-#[cfg(target_os = "android")]
-mod android_ff {
-    use std::ffi::CString;
-    use std::fs::{self, Permissions};
-    use std::os::unix::fs::PermissionsExt;
-    use std::path::{Path, PathBuf};
-    use std::sync::OnceLock;
-    use ndk::asset::AssetManager;
-
-    static ASSET_MGR: OnceLock<AssetManager> = OnceLock::new();
-    static FILES_DIR: OnceLock<PathBuf> = OnceLock::new();
-
-    /// android_main icinden, UI'dan ONCE cagrilir.
-    /// filesDir = internal_data_path (Android'in resmi API'si).
-    /// (Harici izin GEREKMEZ — kendi dosya alanimiz.)
-    pub fn init(app: &android_activity::AndroidApp) {
-        let files = app
-            .internal_data_path()
-            .unwrap_or_else(|| std::env::current_dir().map(|c| c.join("files")).unwrap_or_default());
-        let _ = fs::create_dir_all(&files);
-        let _ = FILES_DIR.set(files);
-        let _ = ASSET_MGR.set(app.asset_manager());
-    }
-
-    /// Uygulamanin filesDir'i (cikarilan ffmpeg/ffprobe burada durur).
-    pub fn files_dir() -> Option<PathBuf> {
-        FILES_DIR.get().cloned()
-    }
-
-    /// ffmpeg/ffprobe henuz cikarilmadiysa asset'lerden cikar + 755 kilar.
-    /// Her baslangicta varlik kontrolden gecer (ucuz).
-    pub fn ensure_binaries() {
-        let am = match ASSET_MGR.get() {
-            Some(a) => a,
-            None => return,
-        };
-        let dir = match FILES_DIR.get() {
-            Some(d) => d.clone(),
-            None => return,
-        };
-        for name in ["ffmpeg", "ffprobe"] {
-            let target = dir.join(name);
-            if target.is_file() {
-                continue;
-            }
-            eprintln!("FF Studio: asset cikariliyor: {name}");
-            if let Err(e) = copy_asset(am, name, &target) {
-                eprintln!("FF Studio: {name} cikarilamadi: {e}");
-            }
-        }
-    }
-
-    /// Asset'i once .part dosyasi olarak yazar, sonra icerige tasiyor —
-    /// uygulama yazma ortasinda kapanirsa yarim dosya geriye kalmaz.
-    fn copy_asset(am: &AssetManager, name: &str, dest: &Path) -> std::io::Result<()> {
-        let cname = CString::new(name).unwrap();
-        let mut asset = am.open(&cname).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::NotFound, format!("asset bulunamadi: {name}"))
-        })?;
-        // Bütün asset'i oku (mmap) ve part dosyaya yaz
-        let data = asset.buffer()?;
-        let tmp = dest.with_extension("part");
-        fs::write(&tmp, data)?;
-        if let Err(e) = fs::rename(&tmp, dest) {
-            let _ = fs::remove_file(&tmp);
-            return Err(e);
-        }
-        let _ = fs::set_permissions(dest, Permissions::from_mode(0o755));
-        Ok(())
-    }
-}
-
-#[cfg(target_os = "android")]
-#[no_mangle]
-fn android_main(app: android_activity::AndroidApp) {
-    // NDK-derlenmis ffmpeg/ffprobe'i filesDir'e cikar (ilk sefer ~5 sn).
-    android_ff::init(&app);
-    android_ff::ensure_binaries();
-    // Dosya tarayici icin JNI hazirligi (context global ref).
-    android_fs::init(app.vm_as_ptr(), app.activity_as_ptr());
-
-    // android-activity kreti C kapisini (extern "C" android_main) uretir;
-    // biz sadece bu fonksiyonu yaziyoruz. winit EventLoop'u android_main
-    // ipligi uzerinde olusturulur — CRUKI sart: eframe'in ic EventLoop'u
-    // AndroidApp'le beslenmeli, yoksa winit panik atar.
-    use winit::platform::android::EventLoopBuilderExtAndroid;
-    let opts = eframe::NativeOptions {
-        event_loop_builder: Some(Box::new(move |builder| {
-            builder.with_android_app(app);
-        })),
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1080.0, 1920.0])
-            .with_min_inner_size([400.0, 700.0]),
-        ..Default::default()
-    };
-    if let Err(e) = eframe::run_native(
-        "FF Studio",
-        opts,
-        Box::new(|cc| {
-            cc.egui_ctx.set_visuals(egui::Visuals::dark());
-            Ok(Box::new(App::new(cc)))
-        }),
-    ) {
-        eprintln!("FF Studio (android) kilitlendi: {e}"); // logcat'te gorunur
-    }
-}

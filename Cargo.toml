@@ -3,12 +3,10 @@ name = "ffstudio"
 version = "0.1.0"
 edition = "2021"
 
-# Uygulama kodu lib'de (masaustu bin + Android cdylib ayni koddan derlenir).
-# crate-type "cdylib" Android icin libffstudio.so uretir (APK'ya girer);
-# masaustunda da zararsiz bir .dll/.so cikar, bin'i etkilemez.
+# Uygulama kodu lib'de (bin + headless testler ayni koddan).
 [lib]
 name = "ffstudio"
-crate-type = ["cdylib", "rlib"]
+crate-type = ["rlib"]
 
 [dependencies]
 eframe = "=0.28.1"
@@ -17,29 +15,15 @@ dirs = "5"
 anyhow = "1"
 image = { version = "0.25", default-features = false, features = ["png"] }
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
+# Masaustu dosya secici (coklu dosya + klasor)
+rfd = "0.14"
+
+[build-dependencies]
+# Windows exe ikonu + surum bilgisi (Gezgin/taskbar) gomme
+winresource = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Registry"] }
-
-# Masaustu dosya secici (rfd) — Android'de yok; orada SAF secici (Faz 4)
-[target.'cfg(not(target_os = "android"))'.dependencies]
-rfd = "0.14"
-
-# Android: eframe'in winit android backend'i + NativeActivity girisi.
-# winit ayrica da gerekli: event_loop_builder hook'u icinde
-# builder.with_android_app(...) cagrilacak (eframe'in kullandigi
-# winit 0.29 ile ayni surumda birlesir).
-# APK paketleme/derleme: bak build_apk.bat (Android Studio GEREKMIYOR,
-# sadece NDK + SDK build-tools; setup_android.bat hepsini kurar).
-[target.'cfg(target_os = "android")'.dependencies]
-eframe = { version = "=0.28.1", features = ["android-native-activity"] }
-android-activity = "0.5"
-# APK asset'lerinden NDK-derlenmis ffmpeg/ffprobe cikarmak icin (guvenli API)
-ndk = "0.8"
-# Dosya tarayici: "tum dosyalara erisim" izni + intent (android-activity ile
-# ayni surumda; tree'de ikinci kopya olusturmaz)
-jni = "0.21"
-winit = { version = "0.29", features = ["android-native-activity"] }
 
 [profile.release]
 opt-level = 3

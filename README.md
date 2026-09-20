@@ -32,6 +32,8 @@ ffmpeg'i **içine gömebilirsin** (all-in-one tek exe) ya da sistemdeki ffmpeg'i
 - **Dil:** **Türkçe (varsayılan) / İngilizce** — üst bardaki TR/EN ciplerinden anında geçiş, seçimi hatırlar
 - **Yazı boyutu (DPI/zoom):** %75–%200 arası ölçekleme (varsayılan %125), yüksek DPI ekranda okunabilirlik için
 - **Gerçek renkli emoji:** egui emoji'leri monokrom çizer; bu yüzden arayüzdeki emoji'ler **gömülü Twemoji PNG'si** olarak çizilir (flat, keskin). Dosyalar `assets/emoji/` altında **Unicode kod noktası (hex)** ile adlandırılmıştır (ör: `1f3ac.png` = 🎬, bayraklar tire ile `1f1f9-1f1f7.png` = 🇹🇷). Emoji'ler `include_bytes!` ile derlenirken .exe içine gömülür — Windows sürümünden ve sistem fontundan bağımsızdır.
+- **Logo her yerde:** pencere başlığı, taskbar, üst panel ve Hakkında penceresi; Windows'ta dosya/exe ikonu da logodur (Gezgin'de, kısayolda, Alt-Tab'da görünür)
+- **Tek pencere:** exe GUI alt sistemiyle derlenir — siyah konsol penceresi açılmaz
 - **Hakkında:** üst bardaki ℹ️ butonu → yapıcı + sürüm + ffmpeg bilgisi
 - **Tema:** koyu (varsayılan) / açık + **kendi vurgu rengin** (Ayarlar penceresinde; seçimin otomatik kaydedilir)
 - **Genişletilebilir dosya listesi:** sol paneli kenarından tutup genişletebilirsin; dosya adları panele sığacak kadar kısalır, üzerine gelince tam ad görünür
@@ -82,10 +84,10 @@ uygulama yeniden açılınca aynen geri gelir.
 
 ## ffmpeg (all-in-one) — 3 seçenek
 
-### 1) Gömülü (önerilen): ffmpeg.zip
-1. https://www.gyan.dev/ffmpeg/builds/ adresinden **ffmpeg-release-essentials.zip** indir
-2. Zip'i **`ffmpeg.zip` olarak proje köküne** (Cargo.toml'in yanına) koy
-3. `cargo build --release`
+### 1) Gömülü (önerilen): ffmpeg.zip — repoda HAZIR
+`ffmpeg.zip` bu repoda proje kökünde duruyor; **ayrıca indirmene gerek yok.**
+1. Repoyu klonla/indir (`ffmpeg.zip` içinde gelir)
+2. `cargo build --release`
 
 Derleme anında zip binary içine gömülür. İlk açılışta `%LOCALAPPDATA%\ffstudio\ffmpeg\` klasörüne
 otomatik çıkarılır. Tek exe + ilk açılışta ~2-3 dk'lık çıkarma işlemi, sonra her şey hızlı.
@@ -122,15 +124,19 @@ bu preset'ler için "CRF?" der; ses preset'lerinde tahmin = bitrate x süre (gay
 ```
 ffstudio/
   build.bat         # tek komut derleme (cargo yoksa rustup.rs uyarısı)
-  upload_github.bat # tek komutla GitHub'a yükleme (anotherphonker/ffstudio)
-  .gitignore        # target/, ffmpeg.zip, *.exe git'e girmez
+  upload_github.bat # tek komutla GitHub'a yükleme (yerel kalır; repo'ya girmez)
+  .gitignore        # target/ ve *.exe git'e girmez; ffmpeg.zip REPODA
+  ffmpeg.zip        # gömülü ffmpeg (all-in-one build girdisi)
   Cargo.toml
-  build.rs          # ffmpeg.zip varsa embed_ffmpeg cfg'ini açar
+  build.rs          # ffmpeg.zip varsa embed_ffmpeg cfg'ini açar +
+                    # Windows exe ikonunu (assets/icon.ico) exe'ye gömer
   assets/
-    logo.png        # app logosu (pencere ikonu + üst panel + Hakkında)
+    logo.png        # app logosu (üst panel + Hakkında + pencere ikonu)
+    icon.ico        # Windows dosya/exe ikonu (Gezgin, taskbar, kısayol)
     emoji/          # gömülü Twemoji PNG'leri (kod noktası hex adı, ör: 1f3ac.png)
   src/
-    main.rs         # UI + uygulama durumu + paralel kuyruk + ayarlar + tema + dil
+    lib.rs          # UI + uygulama durumu + paralel kuyruk + ayarlar + tema + dil
+    main.rs         # masaüstü giriş noktası + pencere (GUI alt sistemi: çift pencere yok)
     ffmpeg.rs       # binary bulma/gömülü çıkarma, ffprobe, PARALEL worker pool
     cpu.rs          # CPU algılama (model adı + çekirdek/thread) → otomatik paralellik
     profiles.rs     # tüm preset'ler, argüman üretimi, boyut tahmini
@@ -148,9 +154,13 @@ ffstudio/
    <https://github.com/settings/tokens> → "repo" izni).
 3. **Sonraki güncellemeler:** kodu değiştir → `upload_github.bat` → bitti.
 
-Not: `ffmpeg.zip` ve `target/` (`.gitignore` ile) repo'ya **girmez** —
-repo hafif kalır; derleme yapan makinede `ffmpeg.zip` zaten bu klasörde
-olur.
+Not: `assets/logo.png`'yi değiştirirsen exe ikonunu da tazele:
+`python -c "from PIL import Image; Image.open('assets/logo.png').convert('RGBA').save('assets/icon.ico', sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])"`
+(Pillow gerekir; ikon zaten repoda olduğu için normalde buna gerek yok.)
+
+Not: `ffmpeg.zip` **repo'da durur** (repoyu indiren all-in-one build alır,
+ayrıca ffmpeg indirmesi gerekmez). Derleme çıktısı `target/` ve `*.exe`
+git'e girmez; `upload_github.bat` de yerel kalır (repoda bulunmaz).
 
 ## Hata ayıklama
 
