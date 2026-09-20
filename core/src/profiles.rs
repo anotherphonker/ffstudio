@@ -41,6 +41,36 @@ pub enum Preset {
 }
 
 impl Preset {
+    /// Tum preset'ler (TUI secici menusu icin; siraya gore gruplanmis).
+    pub const ALL: &'static [Preset] = &[
+        Preset::Auto,
+        Preset::Mp3V0,
+        Preset::Mp3V2,
+        Preset::Mp3Cbr,
+        Preset::Aac,
+        Preset::Opus,
+        Preset::Vorbis,
+        Preset::Flac,
+        Preset::Wav,
+        Preset::H264Mp4,
+        Preset::H265Mp4,
+        Preset::H265Mkv,
+        Preset::Av1Mp4,
+        Preset::Vp9Webm,
+        Preset::Jpeg,
+        Preset::Webp,
+        Preset::Avif,
+        Preset::Png,
+        Preset::Bmp,
+        Preset::CoverArt,
+        Preset::Remux,
+        Preset::Merge,
+        Preset::TargetSize,
+        Preset::Clip,
+        Preset::Gif,
+        Preset::Split,
+    ];
+
     pub const AUDIO: &'static [Preset] = &[
         Preset::Mp3V0,
         Preset::Mp3V2,
@@ -677,7 +707,11 @@ pub fn build(p: &Profile, m: &Media, lang: crate::lang::Lang) -> Result<Built> {
         if p.max_width > 0 {
             let w = m.video.as_ref().map(|v| v.width).unwrap_or(0);
             if w == 0 || w > p.max_width {
-                a.push(format!("-vf scale={}:-2", p.max_width));
+                // DIKKAT: "-vf" ve deger AYRI arguman olmali. Tek arguman
+                // olarak ("-vf scale=...") verilirse ffmpeg
+                // "Unrecognized option" hatasi verir.
+                a.push("-vf".into());
+                a.push(format!("scale={}:-2", p.max_width));
             }
         }
     }

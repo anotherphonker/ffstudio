@@ -1,0 +1,28 @@
+[package]
+name = "gui"
+version = "0.1.0"
+edition = "2021"
+description = "FF Studio masaustu arayuzu (egui/eframe)"
+
+# Binary adi ffstudio kalsin (build.bat ve kullanicilar bunu bekliyor)
+[lib]
+name = "ffstudio"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ffstudio"
+path = "src/main.rs"
+
+[dependencies]
+ffstudio_core = { package = "core", path = "../core", features = ["embed_ffmpeg"] }
+eframe = "=0.28.1"
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Masaustu dosya secici (coklu dosya + klasor)
+rfd = "0.14"
+
+[dev-dependencies]
+ffstudio_core = { package = "core", path = "../core", features = ["embed_ffmpeg", "testutil"] }
+
+[build-dependencies]
+# Windows exe ikonu + surum bilgisi (Gezgin/taskbar) gomme
+winresource = "0.1"

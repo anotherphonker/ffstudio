@@ -3,10 +3,11 @@ setlocal EnableExtensions
 title FF Studio - build
 rem ============================================================
 rem  FF Studio build scripti
-rem  - cargo build --release calistirir
+rem  - cargo build --release -p gui (workspace: masaustu GUI) calistirir
 rem  - ffmpeg.zip bu klasorde varsa binary icine gomulur (all-in-one)
 rem  Kullanim: build.bat            = sadece build
 rem           build.bat run         = build + calistir
+rem  Not: Termux TUI icin: cargo build --release -p tui
 rem ============================================================
 
 set "BUILD_ONLY=1"
@@ -29,7 +30,7 @@ if exist "%~dp0ffmpeg.zip" (
 )
 echo.
 
-cargo build --release
+cargo build --release -p gui
 set "rc=%errorlevel%"
 if not "%rc%"=="0" (
     echo.

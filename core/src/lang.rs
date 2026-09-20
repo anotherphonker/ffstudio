@@ -65,6 +65,23 @@ pub enum Key {
     OutOther,
     PickOutFolder,
     Overwrite,
+    // --- TUI panelleri (GUI'de de kullanilabilir) ---
+    SecFiles,
+    SecDetails,
+    QueueEmpty,
+    StQueued2,
+    WorkersAuto,
+    LabelBitrate,
+    GifWidthLabel,
+    GifFpsLabel,
+    SplitSecsLabel,
+    MergeNameLabel,
+    DResolution,
+    DPixFmt,
+    DFpsNum,
+    DAudioRate,
+    DSizeLabel,
+    CmdPreviewSel,
     LabelSrcAction,
     SrcKeep,
     SrcDelete,
@@ -376,6 +393,70 @@ pub fn tr(lang: Lang, k: Key) -> &'static str {
         Key::PickOutFolder => match lang {
             Lang::Tr => "Çıktı klasörü seç",
             Lang::En => "Choose output folder",
+        },
+        Key::SecFiles => match lang {
+            Lang::Tr => "Dosyalar",
+            Lang::En => "Files",
+        },
+        Key::SecDetails => match lang {
+            Lang::Tr => "Detay",
+            Lang::En => "Details",
+        },
+        Key::QueueEmpty => match lang {
+            Lang::Tr => "kuyruk bos",
+            Lang::En => "queue is empty",
+        },
+        Key::StQueued2 => match lang {
+            Lang::Tr => "Sirada",
+            Lang::En => "Queued",
+        },
+        Key::WorkersAuto => match lang {
+            Lang::Tr => "Otomatik",
+            Lang::En => "Auto",
+        },
+        Key::LabelBitrate => match lang {
+            Lang::Tr => "Bitrate",
+            Lang::En => "Bitrate",
+        },
+        Key::GifWidthLabel => match lang {
+            Lang::Tr => "GIF genisligi",
+            Lang::En => "GIF width",
+        },
+        Key::GifFpsLabel => match lang {
+            Lang::Tr => "GIF FPS",
+            Lang::En => "GIF FPS",
+        },
+        Key::SplitSecsLabel => match lang {
+            Lang::Tr => "Parca suresi (sn)",
+            Lang::En => "Split length (s)",
+        },
+        Key::MergeNameLabel => match lang {
+            Lang::Tr => "Birlesen dosya adi",
+            Lang::En => "Merged file name",
+        },
+        Key::DResolution => match lang {
+            Lang::Tr => "Cozunurluk",
+            Lang::En => "Resolution",
+        },
+        Key::DPixFmt => match lang {
+            Lang::Tr => "Pix fmt",
+            Lang::En => "Pix fmt",
+        },
+        Key::DFpsNum => match lang {
+            Lang::Tr => "FPS",
+            Lang::En => "FPS",
+        },
+        Key::DAudioRate => match lang {
+            Lang::Tr => "Ornekleme",
+            Lang::En => "Sample rate",
+        },
+        Key::CmdPreviewSel => match lang {
+            Lang::Tr => "Komut önizlemesi (seçili dosya)",
+            Lang::En => "Command preview (selected file)",
+        },
+        Key::DSizeLabel => match lang {
+            Lang::Tr => "Boyut",
+            Lang::En => "Size",
         },
         Key::Overwrite => match lang {
             Lang::Tr => "Çıktı zaten varsa üzerine yaz",

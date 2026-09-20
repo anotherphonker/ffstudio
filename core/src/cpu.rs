@@ -36,6 +36,27 @@ impl CpuInfo {
     }
 }
 
+/// Paralel calisma plani: (worker sayisi, is basina thread sayisi).
+///
+/// - worker: otomatik ise CPU'nun mantiksal thread'inin yarisi (2..=8),
+///   manuel ise secilen deger; ikisi de calisacak is sayisiyla sinirlanir
+/// - thread: mantiksal thread'ler worker'lara esit dagitilir
+///
+/// Tek is varsa CPU'nun tumu o ise verilir.
+///
+/// GUI ve TUI bu fonksiyonu AYNI sekilde cagirir (tek yerde mantik).
+pub fn plan(cpu: &CpuInfo, workers_setting: u32, n_jobs: usize) -> (usize, u32) {
+    let logical = cpu.logical.max(1);
+    let n = n_jobs.max(1);
+    let workers = if workers_setting == 0 {
+        cpu.auto_workers().min(n)
+    } else {
+        (workers_setting as usize).min(n)
+    };
+    let threads = (logical / workers as u32).max(1);
+    (workers, threads)
+}
+
 // ---------------------------------------------------------------------------
 // Platform ozel okuma
 // ---------------------------------------------------------------------------

@@ -1,0 +1,26 @@
+[package]
+name = "core"
+version = "0.1.0"
+edition = "2021"
+description = "FF Studio cekirdek mantigi (GUI + TUI ortak)"
+
+# Rust'in yerlesik `core` crate'i ile karismasin diye kutuphane adi farkli:
+[lib]
+name = "ffstudio_core"
+path = "src/lib.rs"
+
+[features]
+# ffmpeg.zip'i exe icine gomme yetenegi (yalnizca masaustu GUI kullanir;
+# TUI Termux'ta sistemi kurulu ffmpeg'i kullanir -> zip bagimliligi tasimaz).
+embed_ffmpeg = ["dep:zip"]
+# Test yardimcilari (yalnizca dev-dependency olarak acilir)
+testutil = []
+
+[dependencies]
+serde_json = "1"
+anyhow = "1"
+dirs = "5"
+zip = { version = "0.6.6", optional = true, default-features = false, features = ["deflate"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_Registry"] }

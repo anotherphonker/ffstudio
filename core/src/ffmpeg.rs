@@ -17,6 +17,10 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// Platform binary uzantisi: Windows'ta ".exe", Linux/Termux'ta bos.
+/// (Termux'ta ffmpeg/ffprobe uzantisiz olur: `pkg install ffmpeg`.)
+pub const EXE: &str = if cfg!(windows) { ".exe" } else { "" };
+
 #[cfg(embed_ffmpeg)]
 const EMBEDDED_ZIP: &[u8] = include_bytes!("../ffmpeg.zip");
 
@@ -40,8 +44,8 @@ impl Ffmpeg {
         #[cfg(embed_ffmpeg)]
         if let Some(dir) = data_dir() {
             let bin = dir.join("ffmpeg");
-            let ff = bin.join("ffmpeg.exe");
-            let fp = bin.join("ffprobe.exe");
+            let ff = bin.join(format!("ffmpeg{EXE}"));
+            let fp = bin.join(format!("ffprobe{EXE}"));
             if ff.is_file() && fp.is_file() {
                 return Ok(Self {
                     ffmpeg: ff,
@@ -64,8 +68,8 @@ impl Ffmpeg {
         if let Ok(exe) = std::env::current_exe() {
             if let Some(d) = exe.parent() {
                 for base in [d.to_path_buf(), d.join("ffmpeg")] {
-                    let ff = base.join("ffmpeg.exe");
-                    let fp = base.join("ffprobe.exe");
+                    let ff = base.join(format!("ffmpeg{EXE}"));
+                    let fp = base.join(format!("ffprobe{EXE}"));
                     if ff.is_file() && fp.is_file() {
                         return Ok(Self {
                             ffmpeg: ff,
@@ -129,6 +133,8 @@ fn find_in_path(bin: &str) -> Option<PathBuf> {
 
 /// Gomulu zipten sadece ffmpeg.exe + ffprobe.exe cikarir (doc/license atlanir).
 #[cfg_attr(not(embed_ffmpeg), allow(dead_code))]
+#[cfg(feature = "embed_ffmpeg")]
+#[allow(dead_code)] // feature acik ama ffmpeg.zip yoksa (embed_ffmpeg cfg kapali) kullanilmaz
 fn extract_zip(bytes: &[u8], target: &Path) -> Result<()> {
     use std::io::Cursor;
     let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).context("zip açılamadı")?;
@@ -144,13 +150,15 @@ fn extract_zip(bytes: &[u8], target: &Path) -> Result<()> {
         if name.contains("..") {
             continue;
         }
-        if fname == "ffmpeg.exe" || fname == "ffprobe.exe" {
+        let want_ff = format!("ffmpeg{EXE}");
+        let want_fp = format!("ffprobe{EXE}");
+        if fname == want_ff || fname == want_fp {
             let mut buf = Vec::with_capacity(f.size() as usize);
             f.read_to_end(&mut buf)
                 .with_context(|| format!("'{name}' zipten okunamadı"))?;
             let out = target.join(&fname);
             fs::write(&out, &buf).with_context(|| format!("yazılamadı: {}", out.display()))?;
-            if fname == "ffmpeg.exe" {
+            if fname == want_ff {
                 found_ff = true;
             } else {
                 found_fp = true;
@@ -158,7 +166,7 @@ fn extract_zip(bytes: &[u8], target: &Path) -> Result<()> {
         }
     }
     if !found_ff || !found_fp {
-        bail!("zip içinde ffmpeg.exe ve/veya ffprobe.exe bulunamadı.");
+        bail!("zip içinde ffmpeg{EXE} ve/veya ffprobe{EXE} bulunamadı.");
     }
     Ok(())
 }
@@ -618,7 +626,7 @@ fn run_one(ffmpeg: &Path, job: &JobSpec, tx: &mpsc::Sender<JobMsg>) -> (bool, St
     (ok, msg, out_size)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "testutil"))]
 pub mod testutil {
     use super::*;
 
