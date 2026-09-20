@@ -1,0 +1,31 @@
+# --- Rust / cargo ---
+/target
+
+# --- build girdisi/çıkışı (büyük binary'ler git'e girmez) ---
+# ffmpeg.zip: all-in-one build için gerekli; ~100MB olduğu için repo'da tutulmaz.
+#   Derlemeyenler README "ffmpeg (all-in-one)" bölümüne baksın.
+ffmpeg.zip
+*.exe
+
+# --- derleme/çalışma zamanı kalıntıları ---
+*.tmp
+*.bak
+
+# --- editör / işletim sistemi ---
+.vscode/
+.idea/
+*.rs.bk
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# --- Android build kalıntıları ---
+android/staging/
+android/app/jniLibs/
+# ffmpeg-arm64.zip'den her build'de yeniden cikarilir (git'te zip kalir)
+android/app/assets/
+dist/
+dist-reference/
+
+# Imza anahtari: git'te OLMAMALI (kaybolursa/ele gecerse guvenlik sorunu)
+ffstudio.keystore
