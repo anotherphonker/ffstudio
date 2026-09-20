@@ -6,6 +6,7 @@ use anyhow::{bail, Context, Result};
 use std::fs;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::thread;
@@ -464,6 +465,72 @@ pub fn pool_workers(requested: usize, n_jobs: usize) -> usize {
     requested.clamp(1, 16).min(n_jobs)
 }
 
+/// Su an calisan ffmpeg cocuk process'leri (Ctrl+C / cikista sonlandirmak icin).
+///
+/// `run_one` her ffmpeg baslattiginda buraya kaydeder, bitince cikarir;
+/// TUI Ctrl+C aldiginda `terminate_active()` ile hepsine SIGTERM gonderir
+/// (boylece orphan ffmpeg kalmaz ve yarim dosyalar duzgun kapanir).
+static ACTIVE_CHILDREN: Mutex<Vec<Arc<Mutex<std::process::Child>>>> = Mutex::new(Vec::new());
+
+/// Calisan tum ffmpeg surec sayisi.
+pub fn active_count() -> usize {
+    ACTIVE_CHILDREN.lock().map(|g| g.len()).unwrap_or(0)
+}
+
+/// Calisan ffmpeg sureclerini SONLANDIR.
+///
+/// Once SIGTERM (unix) yollar; `grace` suresi icinde kapanmayanlar SIGKILL
+/// ile oldurulur. Windows'ta `Child::kill` kullanilir.
+/// Donen deger: sonlandirilan surec sayisi.
+pub fn terminate_active(grace: std::time::Duration) -> usize {
+    let kids: Vec<Arc<Mutex<std::process::Child>>> = match ACTIVE_CHILDREN.lock() {
+        Ok(g) => g.clone(),
+        Err(_) => return 0,
+    };
+    let n = kids.len();
+    for k in &kids {
+        if let Ok(mut c) = k.lock() {
+            kill_term(&mut c);
+        }
+    }
+    if n > 0 {
+        // kapanmalari icin kisa bir sans
+        let t0 = Instant::now();
+        while t0.elapsed() < grace {
+            let alive = kids.iter().any(|k| {
+                k.lock()
+                    .map(|mut c| matches!(c.try_wait(), Ok(None)))
+                    .unwrap_or(false)
+            });
+            if !alive {
+                break;
+            }
+            thread::sleep(std::time::Duration::from_millis(50));
+        }
+        for k in &kids {
+            if let Ok(mut c) = k.lock() {
+                if matches!(c.try_wait(), Ok(None)) {
+                    let _ = c.kill(); // inatciysa: kesin oldur
+                }
+            }
+        }
+    }
+    n
+}
+
+#[cfg(unix)]
+fn kill_term(c: &mut std::process::Child) {
+    // ffmpeg SIGTERM alinca cikti dosyasini duzgun kapatir (SIGKILL'de yarim kalir)
+    unsafe {
+        libc::kill(c.id() as i32, libc::SIGTERM);
+    }
+}
+
+#[cfg(not(unix))]
+fn kill_term(c: &mut std::process::Child) {
+    let _ = c.kill();
+}
+
 /// Paralel calisan arka plan is-pool'u baslatir.
 /// `workers` kadar thread, ortak kuyruktan is alir;
 /// tumu bitince TEK AllDone gonderilir (son biten gonderir).
@@ -592,6 +659,12 @@ fn run_one(ffmpeg: &Path, job: &JobSpec, tx: &mpsc::Sender<JobMsg>) -> (bool, St
         s
     });
 
+    // Cocugu aktif deftere al (Ctrl+C / cikis aninda sonlandirilabilsin)
+    let child = Arc::new(Mutex::new(child));
+    if let Ok(mut g) = ACTIVE_CHILDREN.lock() {
+        g.push(child.clone());
+    }
+
     for (frac, speed) in prx {
         let _ = tx.send(JobMsg::Progress {
             idx: job.job_index,
@@ -601,7 +674,11 @@ fn run_one(ffmpeg: &Path, job: &JobSpec, tx: &mpsc::Sender<JobMsg>) -> (bool, St
     }
     pthr.join().ok();
     let stderr_text = ethr.join().unwrap_or_default();
-    let status = child.wait().ok();
+    let status = child.lock().ok().and_then(|mut c| c.wait().ok());
+    // defterden cikar
+    if let Ok(mut g) = ACTIVE_CHILDREN.lock() {
+        g.retain(|k| !Arc::ptr_eq(k, &child));
+    }
     if let Some(f) = &job.cleanup {
         let _ = fs::remove_file(f);
     }

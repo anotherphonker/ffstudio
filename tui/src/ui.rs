@@ -26,9 +26,53 @@ pub struct Palette {
     pub err: Color,
     pub warn: Color,
     pub sel: Color,
+    /// NO_COLOR: renk yok, vurgular ters-video (REVERSED) ile yapilir
+    pub plain: bool,
 }
 
 impl Palette {
+    /// NO_COLOR icin: hicbir renk kullanilmaz, vurgu ters-video ile verilir.
+    pub fn plain() -> Self {
+        Palette {
+            bg: Color::Reset,
+            fg: Color::Reset,
+            accent: Color::Reset,
+            dim: Color::Reset,
+            ok: Color::Reset,
+            err: Color::Reset,
+            warn: Color::Reset,
+            sel: Color::Reset,
+            plain: true,
+        }
+    }
+
+    /// Uygulamaya gore palet: NO_COLOR doluysa renksiz, degilse secili tema.
+    pub fn for_app(app: &App) -> Self {
+        if app.no_color {
+            Self::plain()
+        } else {
+            Self::of(app.theme)
+        }
+    }
+
+    /// Secili satir stili.
+    pub fn selected(&self) -> Style {
+        if self.plain {
+            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+        } else {
+            Style::default().bg(self.sel).add_modifier(Modifier::BOLD)
+        }
+    }
+
+    /// Vurgu "cip"i (baslik, aktif sekme).
+    pub fn chip(&self) -> Style {
+        if self.plain {
+            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
+        } else {
+            Style::default().fg(self.bg).bg(self.accent).add_modifier(Modifier::BOLD)
+        }
+    }
+
     pub fn of(theme: Theme) -> Self {
         match theme {
             Theme::Default => Palette {
@@ -40,6 +84,7 @@ impl Palette {
                 err: Color::Rgb(240, 110, 110),
                 warn: Color::Rgb(230, 180, 90),
                 sel: Color::Rgb(40, 60, 95),
+                plain: false,
             },
             Theme::Gruvbox => Palette {
                 bg: Color::Rgb(40, 40, 40),
@@ -50,6 +95,7 @@ impl Palette {
                 err: Color::Rgb(251, 73, 52),
                 warn: Color::Rgb(254, 128, 25),
                 sel: Color::Rgb(80, 73, 69),
+                plain: false,
             },
             Theme::Mono => Palette {
                 bg: Color::Black,
@@ -60,6 +106,7 @@ impl Palette {
                 err: Color::White,
                 warn: Color::Gray,
                 sel: Color::DarkGray,
+                plain: false,
             },
             Theme::Solarized => Palette {
                 bg: Color::Rgb(0, 43, 54),
@@ -70,6 +117,7 @@ impl Palette {
                 err: Color::Rgb(220, 50, 47),
                 warn: Color::Rgb(181, 137, 0),
                 sel: Color::Rgb(7, 54, 66),
+                plain: false,
             },
         }
     }
@@ -97,7 +145,7 @@ fn window(len: usize, sel: usize, height: usize) -> (usize, usize) {
 }
 
 pub fn draw(f: &mut Frame, app: &mut App) {
-    let p = Palette::of(app.theme);
+    let p = Palette::for_app(app);
     let area = f.area();
     f.render_widget(Block::default().style(Style::default().bg(p.bg)), area);
 
@@ -197,10 +245,7 @@ fn draw_header(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
         Err(_) => tr(app.lang, Key::FfmpegMissing).to_string(),
     };
     let mut spans = vec![
-        Span::styled(
-            " FF Studio TUI ",
-            Style::default().fg(p.bg).bg(p.accent).add_modifier(Modifier::BOLD),
-        ),
+        Span::styled(" FF Studio TUI ", p.chip()),
         Span::raw("  "),
         Span::styled(
             ff_info,
@@ -243,7 +288,7 @@ fn tabs_line<'a>(app: &App, p: &Palette, _area: Rect) -> Paragraph<'a> {
         spans.push(Span::styled(
             format!(" {name} "),
             if active {
-                Style::default().fg(p.bg).bg(p.accent).add_modifier(Modifier::BOLD)
+                p.chip()
             } else {
                 Style::default().fg(p.dim)
             },
@@ -255,9 +300,9 @@ fn tabs_line<'a>(app: &App, p: &Palette, _area: Rect) -> Paragraph<'a> {
 
 fn draw_status(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
     let hint = if app.running {
-        "q: cikis (bekle)  Tab: panel  //  donusum suruyor..."
+        "q: cikis (bekle)   Ctrl+C: durdur ve cik   Tab: panel"
     } else if app.files.is_empty() {
-        "a: dosya/klasor ekle   ?: yardim   q: cikis"
+        "a: dosya/klasor ekle   ?: yardim   q: cikis   Ctrl+C: cikis"
     } else {
         "a:ekle  c:donustur  p:preset  o:cikti  r:kaynak  w:uzerine-yaz  s:ayarlar  ?:yardim  q:cikis"
     };
@@ -303,11 +348,7 @@ fn draw_files(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
                 ffstudio_core::ffmpeg::Kind::Video => ("VID", Color::Rgb(167, 139, 250)),
                 ffstudio_core::ffmpeg::Kind::Image => ("RES", Color::Rgb(52, 211, 153)),
             };
-            let style = if selected {
-                Style::default().bg(p.sel).add_modifier(Modifier::BOLD)
-            } else {
-                Style::default()
-            };
+            let style = if selected { p.selected() } else { Style::default() };
             ListItem::new(Line::from(vec![
                 Span::styled(format!("{} ", if selected { ">" } else { " " }), style),
                 Span::styled(format!("[{}] ", badge.0), Style::default().fg(badge.1)),
@@ -731,7 +772,7 @@ fn draw_preset_popup(f: &mut Frame, app: &App, p: &Palette) {
             let style = if !available {
                 Style::default().fg(Color::DarkGray)
             } else if sel {
-                Style::default().fg(p.bg).bg(p.accent).add_modifier(Modifier::BOLD)
+                p.selected()
             } else {
                 Style::default().fg(p.fg)
             };
@@ -780,11 +821,7 @@ fn draw_settings_popup(f: &mut Frame, app: &App, p: &Palette) {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{} {:<24}", if sel { ">" } else { " " }, k),
-                if sel {
-                    Style::default().fg(p.bg).bg(p.accent).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(p.fg)
-                },
+                if sel { p.selected() } else { Style::default().fg(p.fg) },
             ),
             Span::styled((*v).clone(), Style::default().fg(p.accent)),
         ]));
@@ -899,7 +936,7 @@ fn draw_quit_popup(f: &mut Frame, app: &App, p: &Palette) {
     let inner = block.inner(area);
     f.render_widget(block, area);
     let msg = if app.running {
-        "Donusum suruyor! Yine de cikilsin mi?  e / h"
+        "Donusum suruyor! Cikilirsa ffmpeg surecleri durdurulur.  e / h"
     } else {
         "Cikilsin mi?  e / h"
     };
@@ -969,7 +1006,7 @@ fn draw_browse(f: &mut Frame, app: &mut App, p: &Palette) {
                     .unwrap_or_default();
                 let is_media = !e.is_dir && util::is_media_ext(e.path.extension().and_then(|x| x.to_str()).unwrap_or_default());
                 let style = if sel {
-                    Style::default().fg(p.bg).bg(p.accent).add_modifier(Modifier::BOLD)
+                    p.selected()
                 } else if e.is_dir {
                     Style::default().fg(p.accent)
                 } else if is_media {

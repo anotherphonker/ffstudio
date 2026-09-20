@@ -16,8 +16,10 @@ pub mod config;
 pub mod ui;
 
 use std::io::{self, Stdout};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use crossterm::cursor;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -33,11 +35,67 @@ use crate::app::{App, Focus, InputState, InputTarget, Mode};
 use crate::browse::PickMode;
 use crate::config::Settings;
 
+/// SIGINT (Ctrl+C) geldi mi? Ana dongu bunu gorup temiz cikar.
+static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+
+/// Ctrl+C ile kesildi mi?
+pub fn interrupted() -> bool {
+    INTERRUPTED.load(Ordering::SeqCst)
+}
+
+/// Panik olursa terminal raw mode'da kalmasin: kullanicinin shell'i bozulmaz.
+///
+/// ratatui/crossterm uygulamalarinda panik, raw mode + alternate screen
+/// acikken olursa terminal kullanilamaz hale gelebiliyor; bu hook cikista
+/// her seyi geri yukler.
+fn install_panic_hook() {
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        restore_terminal();
+        prev(info);
+    }));
+}
+
+/// Ctrl+C aninda yapilacaklar: bayragi isaretle + aktif ffmpeg sureclerini durdur.
+///
+/// Iki yoldan da cagrilir:
+///   - gercek SIGINT sinyali (disaridan `kill -INT`, Windows'ta Ctrl+C)
+///   - terminal raw mode'da gelen Ctrl+C TUSU (0x03)
+/// Raw mode'da ISIG kapali oldugu icin Ctrl+C sinyal URETMEZ; tus olarak gelir.
+pub(crate) fn interrupt_now() -> usize {
+    INTERRUPTED.store(true, Ordering::SeqCst);
+    ffstudio_core::ffmpeg::terminate_active(Duration::from_millis(1500))
+}
+
+/// Ctrl+C: aktif ffmpeg sureclerine SIGTERM gonder, temiz cikis iste.
+fn install_signal_handler() {
+    let _ = ctrlc::set_handler(|| {
+        // Orphan ffmpeg kalmasin: once SIGTERM, kapanmayanlara SIGKILL
+        let _ = interrupt_now();
+    });
+}
+
+/// Terminali ilk haline dondur (raw mode kapat + alternate screen'den cik).
+fn restore_terminal() {
+    let _ = disable_raw_mode();
+    let _ = execute!(io::stdout(), LeaveAlternateScreen, cursor::Show);
+}
+
 /// TUI'yi baslatir: terminali ayarlar, donguyu calistirir, cikista geri yukler.
-pub fn run_tui() -> io::Result<()> {
+///
+/// Donen deger: `true` = Ctrl+C ile kesildi (cikis kodu 130).
+pub fn run_tui() -> io::Result<bool> {
+    install_panic_hook();
+    install_signal_handler();
+
     let settings = Settings::load();
     let mut app = App::new(settings);
-    run(&mut app)
+    let res = run(&mut app);
+
+    // Ne olursa olsun: calisan ffmpeg kalmasi (orphan) engellenir
+    let _ = ffstudio_core::ffmpeg::terminate_active(Duration::from_millis(1500));
+
+    res.map(|_| interrupted())
 }
 
 /// Termux yardimci komutu: varsa calistir, yoksa sessizce gec.
@@ -57,14 +115,17 @@ fn run(app: &mut App) -> io::Result<()> {
 
     let res = event_loop(&mut terminal, app);
 
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    restore_terminal();
     terminal.show_cursor()?;
     res
 }
 
 fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) -> io::Result<()> {
     loop {
+        // Ctrl+C: temiz cikis (ffmpeg cocuklari sinyal isleyicisinde durdurulur)
+        if interrupted() {
+            break;
+        }
         // tarama: her turda bir dosya ffprobe ile cozulur (UI donmaz)
         if !matches!(app.mode, Mode::Help) {
             app.tick_probe();
@@ -155,7 +216,10 @@ fn handle_key(app: &mut App, k: KeyEvent) -> bool {
             app.quit_confirm = true;
         }
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-            app.quit_confirm = true;
+            // Raw mode'da Ctrl+C sinyal degil tus olarak gelir: dogrudan
+            // ffmpeg cocuklerini durdurup temiz cikar (onay sorulmaz).
+            interrupt_now();
+            return true;
         }
         (KeyCode::Esc, _) => {
             app.quit_confirm = true;
@@ -413,3 +477,38 @@ fn bump(app: &mut App, delta: i32) {
     }
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+    use std::sync::Arc;
+
+    /// Panik hook'u zincirlemeli: once terminali geri yukler, sonra eski
+    /// (varsayilan) hook'u cagirir. Boylece panikte shell bozulmaz.
+    #[test]
+    fn panikte_terminal_geri_yuklenir_ve_eski_hook_calisir() {
+        let called = Arc::new(AtomicBool::new(false));
+        let c = called.clone();
+        // gurultuyu kesen sahte "onceki" hook
+        std::panic::set_hook(Box::new(move |_| {
+            c.store(true, Ordering::SeqCst);
+        }));
+        install_panic_hook();
+        let r = std::panic::catch_unwind(|| panic!("test panik"));
+        assert!(r.is_err(), "panik yakalanmali");
+        assert!(
+            called.load(Ordering::SeqCst),
+            "onceki hook (varsayilan davranis) cagrilmali"
+        );
+        let _ = std::panic::take_hook(); // temizlik
+    }
+
+    /// NO_COLOR doluysa palet renksiz olmali.
+    #[test]
+    fn no_color_renksiz_palet() {
+        let p = crate::ui::Palette::plain();
+        assert!(p.plain);
+        assert_eq!(p.accent, ratatui::style::Color::Reset);
+    }
+}

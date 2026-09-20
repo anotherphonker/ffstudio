@@ -107,6 +107,8 @@ pub struct App {
     pub running: bool,
     pub log: Vec<(String, bool)>,
 
+    /// NO_COLOR ortam degiskeni doluysa renkler kapanir (standart konvansiyon).
+    pub no_color: bool,
     pub mode: Mode,
     pub focus: Focus,
     pub browse: Option<Browse>,
@@ -144,6 +146,9 @@ impl App {
             rx: None,
             running: false,
             log: Vec::new(),
+            no_color: std::env::var_os("NO_COLOR")
+                .map(|v| !v.is_empty())
+                .unwrap_or(false),
             mode: Mode::Main,
             focus: Focus::Files,
             browse: None,

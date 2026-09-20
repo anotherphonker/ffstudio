@@ -61,9 +61,11 @@ pkg install rust ffmpeg termux-api
 git clone https://github.com/anotherphonker/ffstudio
 cd ffstudio
 
-# derle (ayrıntı: aşağıdaki "Derleme (Termux TUI)" bölümü)
+# derle + PATH'e 'ffstudio' kısayolunu kur (ayrıntı: aşağıdaki "Derleme (Termux TUI)")
 ./build.sh
-./target/release/tui
+
+# artık her yerden:
+ffstudio
 ```
 
 `termux-setup-storage` komutunu bir kere çalıştırırsan telefonun depolamasına (`/sdcard`) erişebilirsin.
@@ -85,7 +87,8 @@ cd ffstudio
 | `+` `-` | seçili preset'in parametresi (CRF, bitrate, kalite, süre…) |
 | `Tab` | panel değiştir (Dosyalar → Profil → Detay → Kuyruk → Log) |
 | `t` / `l` / `s` | tema / dil (TR-EN) / ayarlar penceresi |
-| `q` | çıkış (onay ister) |
+| `q` | çıkış (onay ister; çalışan işler için "durdurulacak" uyarısı verir) |
+| `Ctrl+C` | **durdur ve çık** — çalışan ffmpeg süreçleri sonlandırılır (orphan kalmaz), terminal geri yüklenir |
 
 **Özellikler (GUI ile aynı)**
 
@@ -104,6 +107,11 @@ cd ffstudio
 - Çıktı yolu girdinin kendisi olacaksa (`mp4 → mp4` aynı klasör) `_donusen` ekli güvenli ad kullanılır; kaynak asla ezilmez
 - `termux-wake-lock` ile ekran kapalıyken de dönüşüm sürer (`termux-api` kuruluysa)
 - Log paneli (hatalar farklı renkte), TR/EN dil, terminal-güvenli 4 hazır tema
+- **Panik koruması:** beklenmedik bir hata olsa bile terminal raw mode'da kalmaz (shell bozulmaz)
+- **`--help` / `--version`:** `ffstudio --version` sürümü + bulunan ffmpeg'i + config yolunu gösterir
+  (GUI'deki "Hakkında" panelinin CLI karşılığı)
+- **`NO_COLOR`:** `NO_COLOR=1 ffstudio` → renkler kapanır, vurgular ters-video ile verilir
+- **`XDG_CONFIG_HOME`:** ayar dosyası `$XDG_CONFIG_HOME/ffstudio-tui/config.json`, tanımlı değilse `~/.config/...`
 
 **Ayar dosyası:** `~/.config/ffstudio-tui/config.json` (GUI'nin ayarlarından ayrıdır; dil, tema,
 paralel iş sayısı, üzerine yazma, kaynak işlemi burada saklanır).
@@ -152,6 +160,11 @@ Hızlı test için: `cargo run -p tui`
 
 TUI, Windows sürümünden farklı olarak ffmpeg'i **gömmez** — sistemde
 PATH'te bulunan ffmpeg'i kullanır (`pkg install ffmpeg` yeterli).
+
+`./build.sh` ayrıca binary'yi PATH'e **kısayol** olarak kurar: Termux'ta `$PREFIX/bin/ffstudio`,
+genel Linux'ta `~/.local/bin/ffstudio` (PATH'te değilse nasıl ekleneceğini söyler). Termux'ta
+ek olarak `~/.shortcuts/ffstudio` oluşturulur — **Termux:Widget** kuruluysa ana ekrana tek dokunuş
+ikonu olarak ekleyebilirsin.
 
 ## Ayarlar (sağ üst)
 

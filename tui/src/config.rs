@@ -118,9 +118,18 @@ impl Default for Settings {
     }
 }
 
-/// Config dosyasinin yolu: ~/.config/ffstudio-tui/config.json
+/// Config dosyasinin yolu.
+///
+/// Sirayla: `$XDG_CONFIG_HOME` -> `$HOME/.config` -> `dirs::config_dir()`.
+/// Yani Termux ve genel Linux'ta `~/.config/ffstudio-tui/config.json`,
+/// XDG_CONFIG_HOME ayarliysa onun altinda.
 pub fn config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("ffstudio-tui").join("config.json"))
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
+        .or_else(dirs::config_dir);
+    base.map(|b| b.join("ffstudio-tui").join("config.json"))
 }
 
 impl Settings {
@@ -183,6 +192,25 @@ mod tests {
         assert!(back.overwrite);
         assert_eq!(back.out_mode, OutMode::Dir(PathBuf::from("/tmp/x")));
         assert_eq!(back.src_action, SrcAction::Move);
+    }
+
+    /// XDG_CONFIG_HOME verilirse config yolu onun altinda olmali.
+    #[test]
+    fn xdg_config_home_oncelikli() {
+        let eski = std::env::var_os("XDG_CONFIG_HOME");
+        let tmp = std::env::temp_dir().join(format!("ffstudio_xdg_{}", std::process::id()));
+        std::env::set_var("XDG_CONFIG_HOME", &tmp);
+        let p = config_path().expect("config yolu");
+        assert!(
+            p.starts_with(&tmp),
+            "XDG_CONFIG_HOME kullanilmali: {}",
+            p.display()
+        );
+        assert!(p.ends_with("ffstudio-tui/config.json"));
+        match eski {
+            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
     }
 
     #[test]
