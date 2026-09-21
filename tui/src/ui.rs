@@ -149,30 +149,16 @@ fn window(len: usize, sel: usize, height: usize) -> (usize, usize) {
 pub const MIN_COLS: u16 = 20;
 pub const MIN_ROWS: u16 = 8;
 
-/// Bu boyuttan BUYUK terminallerde arayuz bu alana kirpilir ve orta­lanir;
-/// ayrica TUI'yi kaplayan "zoom out yap" uyarisi gosterilir.
-/// (Termux'ta pinch-zoom ile font kucultulunce satir/sutun sayisi cok artar;
-///  bir noktadan sonra icerik okunaksiz/dağınık olur ve ekrana sigmaz.)
-pub const MAX_COLS: u16 = 200;
-pub const MAX_ROWS: u16 = 60;
+/// TAM arayuzun (3 panel + kuyruk + log + durum satiri) TAM sigdigi en kucuk
+/// boyut. Kullanicinin pinch-zoom ile "her seyin sigdigi" olarak gordugu
+/// genislik budur: bu boyutun UZERINDE her sey gorunur, ALTINDA hicbir panel
+/// gizlenmez -> TUI'yi kaplayan "zoom out yap" uyarisi gosterilir.
+pub const FIT_COLS: u16 = 110;
+pub const FIT_ROWS: u16 = 20;
 
-/// Terminal desteklenen en buyuk boyuttan buyuk mu?
-pub fn oversized(area: Rect) -> bool {
-    area.width > MAX_COLS || area.height > MAX_ROWS
-}
-
-/// Arayuzun CIZILECEGI alan: en buyuk desteklenen boyuta kirpilir ve
-/// terminalin ortasina yerlestirilir (letterbox). Boylece "en buyuk ama
-/// her seyin sigdigi" cozunurluk kullanilir; icerik asla gerilmez.
-pub fn effective_area(area: Rect) -> Rect {
-    let w = area.width.min(MAX_COLS);
-    let h = area.height.min(MAX_ROWS);
-    Rect {
-        x: area.x + (area.width - w) / 2,
-        y: area.y + (area.height - h) / 2,
-        width: w,
-        height: h,
-    }
+/// Tam arayuz bu alana sigiyor mu?
+pub fn fits(area: Rect) -> bool {
+    area.width >= FIT_COLS && area.height >= FIT_ROWS
 }
 
 /// Ust/yan panellerin toplam yuzdesi; artani ESMEYEN govde paneli alir.
@@ -240,59 +226,36 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         return;
     }
 
-    // Ekran desteklenen en buyuk boyuttan buyukse: arayuz EN BUYUK sigabilen
-    // cozunurlukte (ortalanmis) cizilir; en sonda TUMUNU kaplayan uyari gelir.
-    // (MAX'in altindaysa eff == area olur, yani hicbir sey degismez.)
-    let eff = effective_area(area);
-
+    // 2) Termux depolama izni yoksa: dosya gezici yerine net Turkce hata ekrani
     if app.storage_error.is_some() {
-        // 2) Termux depolama izni yoksa: dosya gezici yerine net Turkce hata ekrani
-        draw_storage_error(f, app, &p, eff);
+        draw_storage_error(f, app, &p, area);
     } else if matches!(app.mode, Mode::Browse) {
-        draw_browse(f, app, &p, eff);
+        // Gezici tek ekranliktir: dar terminalde de calisir, uyari gerekmez.
+        draw_browse(f, app, &p, area);
     } else {
-    let narrow = eff.width < 110;
-    let chunks = main_layout(eff);
+    // TAM ARAYUZ: hicbir panel gizlenmez; yerlesim tamamen oransaldir, bu
+    // yuzden terminal ne kadar kucuk/buyuk olursa olsun paneller ust uste
+    // binmez. Terminal tam arayuzun sigdigindan KUCUKSE (pinch-zoom ile font
+    // buyutuldu) asagida TUM ekrani kaplayan "zoom out yap" uyarisi cikar.
+    let chunks = main_layout(area);
 
     draw_header(f, app, &p, chunks[0]);
 
-    if narrow {
-        // Dar ekran: odaktaki paneli tam boy ciz
-        f.render_widget(
-            tabs_line(app, &p, chunks[1]).block(Block::default().borders(Borders::BOTTOM)),
-            chunks[1],
-        );
-        let inner = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Percentage(10), // sekme satiri
-                Constraint::Min(2),         // panel (esneyen)
-            ])
-            .split(chunks[1]);
-        let body = inner[1];
-        match app.focus {
-            Focus::Files => draw_files(f, app, &p, body),
-            Focus::Profile => draw_profile(f, app, &p, body),
-            Focus::Details => draw_details(f, app, &p, body),
-            Focus::Queue => draw_queue(f, app, &p, body),
-            Focus::Log => draw_log(f, app, &p, body),
-        }
+    // 3 panel YAN YANA (dar ekranda da gizlenmez, oransal olarak daralir)
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(26),
+            Constraint::Percentage(41),
+            Constraint::Percentage(33),
+        ])
+        .split(chunks[1]);
+    draw_files(f, app, &p, cols[0]);
+    draw_profile(f, app, &p, cols[1]);
+    if app.files.is_empty() {
+        draw_help_block(f, &p, cols[2]);
     } else {
-        let cols = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(26),
-                Constraint::Percentage(41),
-                Constraint::Percentage(33),
-            ])
-            .split(chunks[1]);
-        draw_files(f, app, &p, cols[0]);
-        draw_profile(f, app, &p, cols[1]);
-        if app.files.is_empty() {
-            draw_help_block(f, &p, cols[2]);
-        } else {
-            draw_details(f, app, &p, cols[2]);
-        }
+        draw_details(f, app, &p, cols[2]);
     }
 
     draw_queue(f, app, &p, chunks[2]);
@@ -301,43 +264,74 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Popuplar
     match app.mode {
-        Mode::Preset => draw_preset_popup(f, app, &p, eff),
-        Mode::Settings => draw_settings_popup(f, app, &p, eff),
-        Mode::Help => draw_help_popup(f, app, &p, eff),
+        Mode::Preset => draw_preset_popup(f, app, &p, area),
+        Mode::Settings => draw_settings_popup(f, app, &p, area),
+        Mode::Help => draw_help_popup(f, app, &p, area),
         _ => {}
     }
     if app.input.is_some() {
-        draw_input_popup(f, app, &p, eff);
+        draw_input_popup(f, app, &p, area);
     }
     if app.quit_confirm {
-        draw_quit_popup(f, app, &p, eff);
+        draw_quit_popup(f, app, &p, area);
+    }
+
+    // Paneller sigmiyorsa: TUM ekrani kaplayan uyari. Paneller YINE DE
+    // cizilmistir; 'u' ile yoksayinca sikisik da olsa hepsi gorunur.
+    if !fits(area) && !app.fit_ack {
+        draw_fit_warning(f, app, &p, area);
     }
     } // ana ekran blogu sonu
-
-    // 3) Ekran desteklenenden buyukse: TUI'yi kaplayan uyari (en son cizilir,
-    //    bu yuzden TUM modlarda gorunur: ana ekran, gezici, depolama hatasi).
-    if oversized(area) && !app.big_screen_ack {
-        draw_oversized_warning(f, app, &p, area, eff);
-    }
 }
 
 /// "Ekran cok buyuk" uyarisi: TUM ekrani kaplar (TUI gorunmez) ve kullaniciya
 /// zoom out yapmasini soyler. `u` ile yok sayilabilir; bir sonraki resize'TA
 /// (pinch-zoom) uyari kendiliginden geri gelir.
-fn draw_oversized_warning(f: &mut Frame, app: &App, p: &Palette, area: Rect, eff: Rect) {
+/// "Paneller ekrana sigmiyor" uyarisi: TUM ekrani kaplar ve kullaniciya
+/// zoom out yapmasini soyler (pinch-zoom ile font kucultulunce satir/sutun
+/// sayisi artar ve her sey sigar). 'u' ile yok sayilabilir; bir sonraki
+/// resize'TA (pinch-zoom) uyari kendiliginden geri gelir.
+fn draw_fit_warning(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
     let l = app.lang;
-    // 1) TUI'yi tamamen kapat (uyari ekranin TAMAMINI kaplar)
+    // 1) Arayuzu kapat (uyari ekranin TAMAMINI kaplar)
     f.render_widget(Clear, area);
     f.render_widget(Block::default().style(Style::default().bg(p.bg)), area);
 
+    // Cok kucuk terminalde kutu cizilemez: tek satirlik kirpilmis mesaj
+    if area.width < 46 || area.height < 6 {
+        let msg = format!(
+            "{} — {}x{} (min {}x{})",
+            tr(l, Key::FitTitle),
+            area.width,
+            area.height,
+            FIT_COLS,
+            FIT_ROWS
+        );
+        f.render_widget(
+            Paragraph::new(Line::from(Span::styled(
+                util::truncate(&msg, area.width as usize),
+                Style::default().fg(p.warn).add_modifier(Modifier::BOLD),
+            )))
+            .alignment(ratatui::layout::Alignment::Center)
+            .wrap(Wrap { trim: true }),
+            Rect {
+                x: area.x,
+                y: area.y + area.height / 2,
+                width: area.width,
+                height: 1.min(area.height),
+            },
+        );
+        return;
+    }
+
     // 2) Ortalanmis uyari kutusu
-    let kutu = centered(area, pct(area, 78, 30, 76), pct_h(area, 40, 7, 11));
+    let kutu = centered(area, pct(area, 86, 46, 84), pct_h(area, 50, 8, 13));
     f.render_widget(
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(p.warn).add_modifier(Modifier::BOLD))
             .style(Style::default().bg(p.bg))
-            .title(format!(" {} ", tr(l, Key::OversizedTitle))),
+            .title(format!(" {} ", tr(l, Key::FitTitle))),
         kutu,
     );
     let inner = Rect {
@@ -346,33 +340,23 @@ fn draw_oversized_warning(f: &mut Frame, app: &App, p: &Palette, area: Rect, eff
         width: kutu.width.saturating_sub(2),
         height: kutu.height.saturating_sub(2),
     };
-
     let satirlar = vec![
-        // Simdiki boyut ve desteklenen en buyuk boyut
         Line::from(Span::styled(
-            format!(
-                "{}: {}x{}      {}: {}x{}",
-                tr(l, Key::OversizedTerminal),
-                area.width,
-                area.height,
-                tr(l, Key::OversizedMax),
-                MAX_COLS,
-                MAX_ROWS
-            ),
+            format!("{}: {}x{}", tr(l, Key::FitTerminal), area.width, area.height),
             Style::default().fg(p.fg),
         )),
         Line::from(Span::styled(
-            format!("({}x{})", eff.width, eff.height),
-            Style::default().fg(p.dim),
+            format!("{}: {}x{}", tr(l, Key::FitNeed), FIT_COLS, FIT_ROWS),
+            Style::default().fg(p.accent),
         )),
         Line::from(""),
         Line::from(Span::styled(
-            tr(l, Key::OversizedZoom),
+            tr(l, Key::FitZoom),
             Style::default().fg(p.warn).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
         Line::from(Span::styled(
-            tr(l, Key::OversizedIgnore),
+            tr(l, Key::FitIgnore),
             Style::default().fg(p.dim),
         )),
     ];
@@ -436,30 +420,6 @@ fn draw_header(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
             .block(block),
         area,
     );
-}
-
-fn tabs_line<'a>(app: &App, p: &Palette, _area: Rect) -> Paragraph<'a> {
-    let names = [
-        (Focus::Files, tr(app.lang, Key::SecFiles)),
-        (Focus::Profile, tr(app.lang, Key::SecProfile)),
-        (Focus::Details, tr(app.lang, Key::SecDetails)),
-        (Focus::Queue, tr(app.lang, Key::SecQueue)),
-        (Focus::Log, tr(app.lang, Key::LogHdr)),
-    ];
-    let mut spans: Vec<Span> = Vec::new();
-    for (foc, name) in names {
-        let active = app.focus == foc;
-        spans.push(Span::styled(
-            format!(" {name} "),
-            if active {
-                p.chip()
-            } else {
-                Style::default().fg(p.dim)
-            },
-        ));
-        spans.push(Span::raw(" "));
-    }
-    Paragraph::new(Line::from(spans)).wrap(Wrap { trim: true })
 }
 
 fn draw_status(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
@@ -1533,147 +1493,108 @@ mod tests {
     }
 
     // ------------------------------------------------------------------
-    // "Ekran cok buyuk" (MAX_COLS/MAX_ROWS) davranisi
+    // "Paneller sigmiyor" (FIT_COLS x FIT_ROWS) davranisi
     // ------------------------------------------------------------------
 
-    /// En buyuk desteklenen boyut tam olarak MAX olmali ve kirpma
-    /// ortalanmis olmali (letterbox).
+    /// Esik: 110x20 ve UZERI tam arayuz; ALTINDA uyari.
     #[test]
-    fn effective_area_kirpar_ve_ortalar() {
-        // Sinirda: degisiklik yok
-        let a = Rect::new(0, 0, MAX_COLS, MAX_ROWS);
-        assert!(!oversized(a));
-        assert_eq!(effective_area(a), a);
-
-        // Bir sutun fazla -> kirpilir
-        let a = Rect::new(0, 0, MAX_COLS + 1, MAX_ROWS);
-        assert!(oversized(a));
-        let e = effective_area(a);
-        assert_eq!((e.width, e.height), (MAX_COLS, MAX_ROWS));
-
-        // Buyuk ekran: ortalama (letterbox)
-        let a = Rect::new(0, 0, 240, 80);
-        assert!(oversized(a));
-        let e = effective_area(a);
-        assert_eq!((e.width, e.height), (MAX_COLS, MAX_ROWS));
-        assert_eq!(e.x, 20, "yatay ortalama");
-        assert_eq!(e.y, 10, "dikey ortalama");
-
-        // Kirpilmis alanda layout yine TAM oturuyor (tasma yok)
-        let c = main_layout(e);
-        assert_eq!(c.iter().map(|r| r.height).sum::<u16>(), e.height);
-        assert_eq!(c[0].x, e.x);
-        assert_eq!(c[0].y, e.y);
+    fn fits_esigi() {
+        assert!(fits(Rect::new(0, 0, FIT_COLS, FIT_ROWS)));
+        assert!(fits(Rect::new(0, 0, 200, 60)));
+        assert!(fits(Rect::new(0, 0, FIT_COLS + 40, FIT_ROWS)));
+        assert!(!fits(Rect::new(0, 0, FIT_COLS - 1, FIT_ROWS)), "1 sutun eksik");
+        assert!(!fits(Rect::new(0, 0, FIT_COLS, FIT_ROWS - 1)), "1 satir eksik");
+        assert!(!fits(Rect::new(0, 0, 46, 44)), "telefon varsayilan fontu");
     }
 
-    /// Ekran MAX'tan buyukse TUI'yi kaplayan "zoom out" uyarisi cizilir;
-    /// MAX'a kadar (ve tam sinirda) cizilmez.
+    /// KULLANICI GERI BILDIRIMI: dar ekranda panel GIZLENMEZ; paneller
+    /// sigmiyorsa TUM ekrani kaplayan "zoom out yap" uyarisi cikar.
     #[test]
-    fn buyuk_ekranda_kapatan_uyari_cizilir() {
+    fn sigmayan_ekranda_uyari_cikar_panel_gizlenmez() {
         use crate::app::{App, Mode};
         use crate::config::Settings;
         gecici_config();
         let mut app = App::new(Settings::default());
         app.mode = Mode::Main;
-        app.profile.preset = Preset::Mp3Cbr;
 
-        // Sinir ve altinda: uyari YOK
-        for (w, h) in [(120u16, 40u16), (MAX_COLS, MAX_ROWS), (MAX_COLS - 1, MAX_ROWS)] {
+        // Tam arayuzun sigdigi boyut: uyari YOK, TUM paneller gorunur
+        for (w, h) in [(FIT_COLS, FIT_ROWS), (120, 40), (200, 60), (110, 44)] {
             let metin = ciz(&mut app, w, h).join("\n");
-            assert!(
-                !metin.contains("Ekran çok büyük"),
-                "{w}x{h}: uyari cizilmemeli"
-            );
+            assert!(!metin.contains("Paneller ekrana sığmıyor"), "{w}x{h}: uyari olmamali");
+            for parca in ["Dosya ekle", "Dönüşüm Profili", "Kuyruk", "Log"] {
+                assert!(metin.contains(parca), "{w}x{h}: '{parca}' gorunmeli");
+            }
         }
 
-        // Buyuk ekran: uyari TUM ekrani kaplar ve zoom out der
-        for (w, h) in [(MAX_COLS + 1, MAX_ROWS), (240, 80), (300, 100)] {
+        // Sigmiyorsa: uyari TUM ekrani kaplar
+        for (w, h) in [(46, 44), (109, 44), (110, 19), (60, 30), (80, 24)] {
             let ekran = ciz(&mut app, w, h);
             let metin = ekran.join("\n");
-            assert!(metin.contains("Ekran çok büyük"), "{w}x{h}: baslik yok");
+            assert!(metin.contains("Paneller ekrana sığmıyor"), "{w}x{h}: baslik yok");
+            assert!(metin.contains("zoom out"), "{w}x{h}: zoom out uyarisi yok");
             assert!(
-                metin.contains("zoom out"),
-                "{w}x{h}: zoom out uyarisi yok"
+                metin.contains(&format!("{FIT_COLS}x{FIT_ROWS}")),
+                "{w}x{h}: gereken boyut yazilmali"
             );
             assert!(
-                metin.contains(&format!("{MAX_COLS}x{MAX_ROWS}")),
-                "{w}x{h}: desteklenen boyut yazilmali"
+                !metin.contains("Dönüşüm Profili"),
+                "{w}x{h}: uyari TUI'yi kaplamali"
             );
-            // TUI KAPLANMIS olmali: panel basliklari gorunmez
-            assert!(
-                !metin.contains("3 - Kuyruk") && !metin.contains("4 - Log"),
-                "{w}x{h}: TUI uyarinin altinda kalmamis"
-            );
-            // Uyari ekranin tamamini kaplar (tum satirlar bos ya da kutunun parcasi)
-            assert_eq!(ekran.len(), h as usize);
         }
 
-        // 'u' ile yoksayilinca TUI gorunur, uyari gizlenir
-        app.big_screen_ack = true;
-        let metin = ciz(&mut app, 240, 80).join("\n");
-        assert!(!metin.contains("Ekran çok büyük"), "yoksayildi: uyari gitmeli");
-        assert!(metin.contains("3 - Kuyruk"), "yoksayildi: TUI gorunmeli");
-        // ve TUI kirpilmis alanda cizilmis olmali (kirpilan alanin disinda panel yok)
-        let ekran = ciz(&mut app, 240, 80);
-        let e = effective_area(Rect::new(0, 0, 240, 80));
-        for (i, satir) in ekran.iter().enumerate() {
-            if satir.trim().is_empty() {
-                continue;
-            }
-            let y = i as u16;
-            assert!(
-                y >= e.y && y < e.y + e.height,
-                "satir {i}: kirpilan alanin disinda cizim var"
-            );
+        // 'u' ile yoksayilinca: uyari GIDER ama paneller GIZLENMEZ
+        // (dar ekranda basliklar kirpilir; kisa adlarla kontrol edilir)
+        app.fit_ack = true;
+        let ekran = ciz(&mut app, 46, 44);
+        let metin = ekran.join("\n");
+        assert!(!metin.contains("Paneller ekrana sığmıyor"), "yoksayildi: uyari gitmeli");
+        for parca in ["Dosya", "Dönüşüm", "Kuyruk", "Log"] {
+            assert!(metin.contains(parca), "yoksayildi: '{parca}' hala gorunmeli: {metin}");
         }
+        // 3 panel YAN YANA: cerceve sayisi (ust cerceveler) yeterli olmali
+        let cerceve = ekran.iter().filter(|l| l.matches('┌').count() > 0).count();
+        assert!(cerceve >= 3, "yoksayildi: 3 panel yan yana cizilmeli (bulunan {cerceve})");
     }
 
-    /// Uyari TUM modlari kaplar: gezici ve depolama hatasi ekraninda da
-    /// buyuk ekranda uyari gorunur; ayrica KUCUK ekran korumasi bozulmaz
-    /// (MAX ile MIN cakismaz: <20 sutun ile >200 sutun ayni anda olamaz).
+    /// Yoksayma yalnizca ANA ekran icin: gezici tek ekranliktir ve dar
+    /// terminalde de calisir; depolama hata ekrani da kaplanmaz.
     #[test]
-    fn uyari_gezici_ve_depolama_ekranini_da_kaplar() {
+    fn gezici_ve_depolama_uyaridan_etkilenmez() {
         use crate::app::{App, Mode};
         use crate::browse::PickMode;
         use crate::config::Settings;
         gecici_config();
         let mut app = App::new(Settings::default());
 
-        // Gezici modu + buyuk ekran -> uyari kaplar
         app.open_browse(PickMode::Files);
-        assert!(matches!(app.mode, Mode::Browse));
-        let metin = ciz(&mut app, 240, 80).join("\n");
-        assert!(metin.contains("Ekran çok büyük"), "gezicide uyari yok");
-        assert!(!metin.contains("hizli klasorler"), "gezici kaplanmamis");
+        let metin = ciz(&mut app, 46, 44).join("\n");
+        assert!(metin.contains("hizli klasorler"), "gezici dar ekranda calismali");
+        assert!(!metin.contains("Paneller ekrana sığmıyor"), "gezicide uyari olmamali");
         app.mode = Mode::Main;
         app.browse = None;
 
-        // Depolama hatasi ekrani + buyuk ekran -> uyari kaplar
-        app.storage_error = Some(
-            "Depolama izni verilmemiş.\nTerminale çık, termux-setup-storage çalıştır.".into(),
-        );
-        let metin = ciz(&mut app, 240, 80).join("\n");
-        assert!(metin.contains("Ekran çok büyük"), "depolama ekraninda uyari yok");
-        assert!(!metin.contains("Depolama izni verilmemiş"), "depolama ekrani kaplanmamis");
-        // ...ama MAX icindeki boyutta depolama ekrani normal gorunur
-        let metin = ciz(&mut app, 100, 30).join("\n");
+        app.storage_error = Some("Depolama izni verilmemiş.".into());
+        let metin = ciz(&mut app, 46, 44).join("\n");
         assert!(metin.contains("Depolama izni verilmemiş"));
-        assert!(!metin.contains("Ekran çok büyük"));
+        assert!(!metin.contains("Paneller ekrana sığmıyor"), "depolama ekraninda uyari olmamali");
         app.storage_error = None;
-
-        // Kucuk ekran korumasi hala gecerli (uyari devreye girmez)
-        let metin = ciz(&mut app, 16, 6).join("\n");
-        assert!(metin.contains("Terminal"), "kucuk ekran mesaji: {metin:?}");
-        assert!(!metin.contains("Ekran çok büyük"), "kucuk ekranda uyari olmamali");
     }
 
-    /// MAX esigi: her iki yonde de sinirlar net (oversized yalnizca BUYUK icin).
+    /// Cok kucuk terminalde (MIN altinda) kirilmaz: tek satir kirpilmis mesaj.
     #[test]
-    fn oversized_esigi_buyuk_ekranda() {
-        assert!(!oversized(Rect::new(0, 0, MAX_COLS, MAX_ROWS)));
-        assert!(oversized(Rect::new(0, 0, MAX_COLS + 1, MAX_ROWS)));
-        assert!(oversized(Rect::new(0, 0, MAX_COLS, MAX_ROWS + 1)));
-        assert!(!oversized(Rect::new(0, 0, MIN_COLS, MIN_ROWS)));
+    fn cok_kucuk_ekranda_tek_satir_mesaj() {
+        use crate::app::{App, Mode};
+        use crate::config::Settings;
+        gecici_config();
+        let mut app = App::new(Settings::default());
+        app.mode = Mode::Main;
+        for (w, h) in [(20u16, 8u16), (30, 9), (16, 6)] {
+            let ekran = ciz(&mut app, w, h);
+            let dolu: Vec<&String> = ekran.iter().filter(|l| !l.trim().is_empty()).collect();
+            assert!(!dolu.is_empty(), "{w}x{h}: mesaj yok");
+            assert_eq!(dolu.len(), 1, "{w}x{h}: tek satir olmali");
+            assert!(ekran.iter().all(|l| l.chars().count() <= w as usize), "{w}x{h}: tasma");
+        }
     }
 
     /// Dar terminalde alt bar ipucu kirpilmaz: ya tamamen gorunur ya hic.
@@ -1685,26 +1606,20 @@ mod tests {
         let mut app = App::new(Settings::default());
         app.mode = Mode::Main;
         app.profile.preset = Preset::Mp3Cbr;
+        app.fit_ack = true; // bu test ipucu satirini olcer; uyari kapali olsun
         for w in [40u16, 60, 80, 100, 120, 160] {
             let ekran = ciz(&mut app, w, 30);
-            // Ipucu yarim (orn. "+/") HICBIR satirda gorunmemeli: ya tam ya hic.
-            for l in &ekran {
-                if l.contains("+/-") {
-                    assert!(
-                        l.contains("+/-: değeri değiştir"),
-                        "{w}: yarim/bozuk ipucu: {l}"
-                    );
-                }
-            }
-            // dar terminalde alt bara SIGMIYORSA hic eklenmemeli
             let bar = alt_bar(&ekran);
+            // ALT BAR tek satirdir: ipucu ya TAM ya HIC eklenir (yarim gorunmez).
+            if bar.contains("+/-") {
+                assert!(
+                    bar.contains("+/-: değeri değiştir"),
+                    "{w}: alt barda yarim ipucu: {bar}"
+                );
+                assert!(bar.chars().count() <= w as usize, "{w}: ipucu tasmamali");
+            }
             if w >= 120 {
                 assert!(bar.contains("+/-"), "{w}: genis terminalde eklenmeli");
-            } else if bar.contains("+/-") {
-                assert!(
-                    bar.chars().count() <= w as usize,
-                    "{w}: ipucu tasmamali"
-                );
             }
         }
     }

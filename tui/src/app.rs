@@ -122,9 +122,11 @@ pub struct App {
     pub theme: crate::config::Theme,
     /// Kuyruk baslatildiginda kullanilan spec'ler (kaynak dosya islemleri icin)
     pub started: Vec<JobSpec>,
-    /// Terminal desteklenen en buyuk boyuttan buyukse ("zoom out yap" uyarisi)
-    /// kullanici uyarisini 'u' ile yok saydi mi? Resize'ta sifirlanir.
-    pub big_screen_ack: bool,
+    /// Terminal, TAM arayuzun sigdigi en kucuk boyuttan (FIT_COLS x FIT_ROWS)
+    /// kucukse "zoom out yap" uyarisi gosterilir; kullanici 'u' ile yok
+    /// saydiysa bu alan true olur (sikisik da olsa paneller gizlenmez).
+    /// Her resize/pinch-zoom'da sifirlanir -> uyari yeniden gorunur.
+    pub fit_ack: bool,
 }
 
 impl App {
@@ -165,7 +167,7 @@ impl App {
             quit_confirm: false,
             theme,
             started: Vec::new(),
-            big_screen_ack: false,
+            fit_ack: false,
         };
         match &app.ff {
             Ok(f) => {

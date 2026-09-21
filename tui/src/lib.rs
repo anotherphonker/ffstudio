@@ -148,9 +148,9 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                 if cols > 0 && rows > 0 {
                     terminal.resize(ratatui::layout::Rect::new(0, 0, cols, rows))?;
                 }
-                // Boyut degisti: "ekran cok buyuk" uyarisi yeniden gosterilir
-                // (zoom out yapildiysa zaten kosul ortadan kalkar).
-                app.big_screen_ack = false;
+                // Boyut degisti: "paneller sigmiyor" uyarisi yeniden gosterilir
+                // (kullanici zoom out yaptiysa kosul zaten ortadan kalkar).
+                app.fit_ack = false;
                 terminal.clear()?;
                 terminal.draw(|f| crate::ui::draw(f, app))?;
             }
@@ -190,9 +190,9 @@ fn handle_key(app: &mut App, k: KeyEvent) -> bool {
                 app.settings.theme = app.theme;
                 app.settings.save();
             }
-            // Ekran cok buyuk uyarisini yoksay (uyari TUI'yi kapladigi icin
-            // bu kapi acikken de calismali).
-            KeyCode::Char('u') => app.big_screen_ack = true,
+            // "Paneller sigmiyor" uyarisini yoksay (uyari TUI'yi kapladigi
+            // icin bu kapi acikken de calismali).
+            KeyCode::Char('u') => app.fit_ack = true,
             _ => {}
         }
         return false;
@@ -219,10 +219,10 @@ fn handle_key(app: &mut App, k: KeyEvent) -> bool {
     }
 
     // Gezici modu: tam ekran
-    // "Ekran cok buyuk" uyarisini yoksay: uyari TUI'yi kapladigi icin bu kol
+    // "Paneller sigmiyor" uyarisini yoksay: uyari TUI'yi kapladigi icin bu kol
     // metin girisi DISINDA her modda (gezici, popup, ana ekran) calisir.
     if matches!(k.code, KeyCode::Char('u')) {
-        app.big_screen_ack = true;
+        app.fit_ack = true;
         return false;
     }
 
@@ -650,15 +650,15 @@ mod tests {
         assert!(ozet.contains("CBR"), "profil ozeti: {ozet}");
     }
 
-    /// Ekran desteklenen en buyuk boyuttan buyukse cikan uyari 'u' ile
-    /// yok sayilir; resize oldugunda (pinch-zoom) yeniden gosterilir.
+    /// Paneller ekrana sigmadiginda cikan uyari 'u' ile yok sayilir; resize
+    /// oldugunda (pinch-zoom) yeniden gosterilir.
     #[test]
-    fn buyuk_ekran_uyarisi_u_ile_yoksayilir() {
+    fn sigdirma_uyarisi_u_ile_yoksayilir() {
         let _cfg = gecici_config();
         let mut app = App::new(Settings::default());
-        assert!(!app.big_screen_ack, "baslangicta uyari aktif");
+        assert!(!app.fit_ack, "baslangicta uyari aktif");
         handle_key(&mut app, tus(KeyCode::Char('u')));
-        assert!(app.big_screen_ack, "'u' uyariyi yoksaymali");
+        assert!(app.fit_ack, "'u' uyariyi yoksaymali");
     }
 
     /// SORU 2: "Kaynagi tasi" secilip onaylandiginda hedef klasor sorulur mu?

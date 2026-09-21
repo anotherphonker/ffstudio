@@ -110,6 +110,10 @@ ffstudio
 - **Panik koruması:** beklenmedik bir hata olsa bile terminal raw mode'da kalmaz (shell bozulmaz)
 - **`--help` / `--version`:** `ffstudio --version` sürümü + bulunan ffmpeg'i + config yolunu gösterir
   (GUI'deki "Hakkında" panelinin CLI karşılığı)
+- **Ekran boyutu:** tam arayüz (3 panel + kuyruk + log) en az **110x20** ister; bu boyutun üzerinde
+  her şey görünür. Terminal bundan **küçükse** (Termux'ta pinch-zoom ile yazı büyütüldü) hiçbir panel
+  gizlenmez: TUI'yi kaplayan *"Paneller ekrana sığmıyor — ekranı zoom out yap"* uyarısı çıkar
+  (`u` ile yoksayılıp sıkışık düzende devam edilebilir; pinch-zoom yapıldığında uyarı yenilenir).
 - **`NO_COLOR`:** `NO_COLOR=1 ffstudio` → renkler kapanır, vurgular ters-video ile verilir
 - **`XDG_CONFIG_HOME`:** ayar dosyası `$XDG_CONFIG_HOME/ffstudio-tui/config.json`, tanımlı değilse `~/.config/...`
 

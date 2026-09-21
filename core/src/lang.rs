@@ -88,11 +88,11 @@ pub enum Key {
     PressToRetry,
     LabelSrcAction,
     HintAdjust,
-    OversizedTitle,
-    OversizedTerminal,
-    OversizedMax,
-    OversizedZoom,
-    OversizedIgnore,
+    FitTitle,
+    FitTerminal,
+    FitNeed,
+    FitZoom,
+    FitIgnore,
     SrcKeep,
     SrcDelete,
     SrcMove,
@@ -424,25 +424,25 @@ pub fn tr(lang: Lang, k: Key) -> &'static str {
             Lang::Tr => "Otomatik",
             Lang::En => "Auto",
         },
-        Key::OversizedTitle => match lang {
-            Lang::Tr => "Ekran çok büyük",
-            Lang::En => "Screen too large",
+        Key::FitTitle => match lang {
+            Lang::Tr => "Paneller ekrana sığmıyor",
+            Lang::En => "Panels do not fit on screen",
         },
-        Key::OversizedTerminal => match lang {
+        Key::FitTerminal => match lang {
             Lang::Tr => "Terminal",
             Lang::En => "Terminal",
         },
-        Key::OversizedMax => match lang {
-            Lang::Tr => "Desteklenen en büyük boyut",
-            Lang::En => "Largest supported size",
+        Key::FitNeed => match lang {
+            Lang::Tr => "Gereken en küçük boyut",
+            Lang::En => "Smallest required size",
         },
-        Key::OversizedZoom => match lang {
-            Lang::Tr => "Ekranı zoom out yap (pinch) — aksi halde içerik ekrana sığmaz.",
-            Lang::En => "Zoom out the screen (pinch) — otherwise the content will not fit.",
+        Key::FitZoom => match lang {
+            Lang::Tr => "Ekranı zoom out yap (pinch) — aksi halde tüm paneller ekrana sığmaz.",
+            Lang::En => "Zoom out (pinch) — otherwise all panels will not fit on screen.",
         },
-        Key::OversizedIgnore => match lang {
+        Key::FitIgnore => match lang {
             Lang::Tr => "u: uyarıyı yoksay ve devam et   q / Esc: çıkış",
-            Lang::En => "u: ignore warning and continue   q / Esc: quit",
+            Lang::En => "u: ignore and continue   q / Esc: quit",
         },
         Key::HintAdjust => match lang {
             Lang::Tr => "+/-: değeri değiştir",
