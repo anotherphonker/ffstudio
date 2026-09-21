@@ -148,6 +148,9 @@ fn event_loop(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut App) 
                 if cols > 0 && rows > 0 {
                     terminal.resize(ratatui::layout::Rect::new(0, 0, cols, rows))?;
                 }
+                // Boyut degisti: "ekran cok buyuk" uyarisi yeniden gosterilir
+                // (zoom out yapildiysa zaten kosul ortadan kalkar).
+                app.big_screen_ack = false;
                 terminal.clear()?;
                 terminal.draw(|f| crate::ui::draw(f, app))?;
             }
@@ -187,6 +190,9 @@ fn handle_key(app: &mut App, k: KeyEvent) -> bool {
                 app.settings.theme = app.theme;
                 app.settings.save();
             }
+            // Ekran cok buyuk uyarisini yoksay (uyari TUI'yi kapladigi icin
+            // bu kapi acikken de calismali).
+            KeyCode::Char('u') => app.big_screen_ack = true,
             _ => {}
         }
         return false;
@@ -213,6 +219,13 @@ fn handle_key(app: &mut App, k: KeyEvent) -> bool {
     }
 
     // Gezici modu: tam ekran
+    // "Ekran cok buyuk" uyarisini yoksay: uyari TUI'yi kapladigi icin bu kol
+    // metin girisi DISINDA her modda (gezici, popup, ana ekran) calisir.
+    if matches!(k.code, KeyCode::Char('u')) {
+        app.big_screen_ack = true;
+        return false;
+    }
+
     if matches!(app.mode, Mode::Browse) {
         return handle_browse_key(app, k);
     }
@@ -509,7 +522,10 @@ fn bump(app: &mut App, delta: i32) {
             pr.img_quality = (pr.img_quality as i32 + delta * 5).clamp(1, 100) as u32;
         }
         Preset::TargetSize => pr.target_mb = (pr.target_mb as i32 + delta).clamp(1, 4096) as u32,
-        Preset::Clip | Preset::Gif => {
+        // NOT: Clip BURADA DEGIL: Clip de -crf kullanir, asagidaki is_video
+        // dalinda CRF/ses bitrate'i degisir. (Onceden Clip de bu dala dusuyordu
+        // ve +/- gorunmez gif_fps/gif_width'i degistirdigi icin etkisizdi.)
+        Preset::Gif => {
             pr.gif_fps = (pr.gif_fps as i32 + delta).clamp(5, 30) as u32;
             pr.gif_width = (pr.gif_width as i32 + delta * 40).clamp(160, 1920) as u32;
         }
@@ -551,5 +567,142 @@ mod tests {
         let p = crate::ui::Palette::plain();
         assert!(p.plain);
         assert_eq!(p.accent, ratatui::style::Color::Reset);
+    }
+
+    // ------------------------------------------------------------------
+    // "MP3 CBR bitrate secimi" ve "kaynagi tasi -> hedef klasor" akislari
+    // ------------------------------------------------------------------
+
+    fn tus(kod: KeyCode) -> KeyEvent {
+        KeyEvent::new(kod, KeyModifiers::NONE)
+    }
+
+    /// Bu testler 'r' tusuyla ayar kaydettigi icin config gecici klasore
+    /// yonlendirilir; kullanicinin gercek ayar dosyasi ezilmez.
+    fn gecici_config() -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("ffstudio_tui_cfg_{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::env::set_var("XDG_CONFIG_HOME", &d);
+        d
+    }
+
+    /// SORU 1: MP3 CBR bitrate seviyesi AYRI bir state'te tutulur mu?
+    /// Cevap: evet -> `Profile::mp3_cbr` (core/src/profiles.rs:259, varsayilan
+    /// 320 -> satir 296). '+'/'-' tuslari `bump()` (tui/src/lib.rs:490,496)
+    /// uzerinden 16'lik adimlarla 128..=320 araliginda degistirir. Ayri bir
+    /// "320/256/192/160/128" listesi YOKTUR; bu 5 seviyeye adimlarla tam
+    /// isabet edilir. Ekranda "Bitrate: N kbps" olarak cizilir
+    /// (tui/src/ui.rs:473-474), ffmpeg'e `-b:a {N}k` olarak gider
+    /// (core/src/profiles.rs:414).
+    #[test]
+    fn mp3_cbr_bitrate_ayari_adimlarla_degisir() {
+        let _cfg = gecici_config();
+        let mut app = App::new(Settings::default());
+
+        // 'p' preset menusunu acar; Preset::ALL[3] == Mp3Cbr
+        assert!(!handle_key(&mut app, tus(KeyCode::Char('p'))), "p tusu cikis degil");
+        assert!(matches!(app.mode, Mode::Preset), "'p' preset menusunu acmali");
+        for _ in 0..3 {
+            handle_key(&mut app, tus(KeyCode::Down));
+        }
+        assert_eq!(Preset::ALL[app.preset_sel], Preset::Mp3Cbr);
+        handle_key(&mut app, tus(KeyCode::Enter));
+        assert!(matches!(app.mode, Mode::Main), "secim sonrasi ana ekran");
+
+        // state: mp3_cbr, varsayilan 320
+        assert_eq!(app.profile.preset, Preset::Mp3Cbr);
+        assert_eq!(app.profile.mp3_cbr, 320, "MP3 CBR varsayilani 320");
+
+        // '+' tavanda kalir
+        handle_key(&mut app, tus(KeyCode::Char('+')));
+        assert_eq!(app.profile.mp3_cbr, 320, "320'nin uzerine cikmamali");
+
+        // '-' x4 -> 256 (istenen 5 seviyeden biri)
+        for _ in 0..4 {
+            handle_key(&mut app, tus(KeyCode::Char('-')));
+        }
+        assert_eq!(app.profile.mp3_cbr, 256);
+
+        // alt sinir 128
+        for _ in 0..20 {
+            handle_key(&mut app, tus(KeyCode::Char('-')));
+        }
+        assert_eq!(app.profile.mp3_cbr, 128, "alt sinir 128");
+
+        // 5 seviyenin tamami '+'/'-' ile tam isabet edilebilir mi?
+        for _ in 0..20 {
+            handle_key(&mut app, tus(KeyCode::Char('+')));
+        }
+        assert_eq!(app.profile.mp3_cbr, 320, "ust sinir 320");
+        let mut gorulen = vec![320u32];
+        for _ in 0..12 {
+            handle_key(&mut app, tus(KeyCode::Char('-')));
+            gorulen.push(app.profile.mp3_cbr);
+        }
+        for hedef in [320u32, 256, 192, 160, 128] {
+            assert!(gorulen.contains(&hedef), "{hedef} kbps erisilebilir olmali");
+        }
+
+        // arayuz etiketleri (ui.rs:473 ve profiles.rs:752)
+        let etiket = app.profile.preset.label(Lang::Tr);
+        assert!(etiket.contains("320/256/192/160/128"), "preset basligi: {etiket}");
+        let ozet = ffstudio_core::profiles::desc_of(app.profile.preset, &app.profile, Lang::Tr);
+        assert!(ozet.contains("CBR"), "profil ozeti: {ozet}");
+    }
+
+    /// Ekran desteklenen en buyuk boyuttan buyukse cikan uyari 'u' ile
+    /// yok sayilir; resize oldugunda (pinch-zoom) yeniden gosterilir.
+    #[test]
+    fn buyuk_ekran_uyarisi_u_ile_yoksayilir() {
+        let _cfg = gecici_config();
+        let mut app = App::new(Settings::default());
+        assert!(!app.big_screen_ack, "baslangicta uyari aktif");
+        handle_key(&mut app, tus(KeyCode::Char('u')));
+        assert!(app.big_screen_ack, "'u' uyariyi yoksaymali");
+    }
+
+    /// SORU 2: "Kaynagi tasi" secilip onaylandiginda hedef klasor sorulur mu?
+    /// Cevap: evet, ayri bir adim vardir ama bu bir METIN input'u DEGIL, tam
+    /// ekran klasor secicidir: 'M' -> `open_browse(PickMode::MoveDir)`
+    /// (tui/src/lib.rs:361-364), secici 'd' ile onaylaninca
+    /// `apply_pick` -> `settings.src_move_dir` (tui/src/app.rs:314-325).
+    /// Klasor secilmemisse donusum sonrasi kaynak dosya TASINMAZ; log'a
+    /// "Tasima icin klasor secilmedi - kaynak aynen birakildi." yazilir
+    /// (tui/src/app.rs:724-731, core/src/lang.rs:996).
+    #[test]
+    fn tasi_secimi_hedef_klasor_ister() {
+        let _cfg = gecici_config();
+        let mut app = App::new(Settings::default());
+        use crate::config::SrcAction;
+
+        // 'r' dongusu: Keep -> Delete -> Move
+        assert!(matches!(app.settings.src_action, SrcAction::Keep));
+        handle_key(&mut app, tus(KeyCode::Char('r')));
+        assert!(matches!(app.settings.src_action, SrcAction::Delete));
+        handle_key(&mut app, tus(KeyCode::Char('r')));
+        assert!(matches!(app.settings.src_action, SrcAction::Move), "'r' x2 -> Tasi");
+        assert!(app.settings.src_move_dir.is_none(), "henuz klasor secilmedi");
+
+        // 'M' -> tam ekran gezici, MoveDir modunda
+        handle_key(&mut app, tus(KeyCode::Char('M')));
+        assert!(matches!(app.mode, Mode::Browse), "'M' geziciyi acmali");
+        assert!(
+            matches!(app.browse.as_ref().unwrap().mode, PickMode::MoveDir),
+            "gezici tasima-klasoru modunda olmali"
+        );
+
+        // 'd' -> o anki klasoru onayla
+        let beklenen = app.browse.as_ref().unwrap().cur.clone();
+        handle_key(&mut app, tus(KeyCode::Char('d')));
+        assert_eq!(
+            app.settings.src_move_dir.as_deref(),
+            Some(beklenen.as_path()),
+            "onaylanan klasor src_move_dir'e yazilmali"
+        );
+        assert!(matches!(app.mode, Mode::Main), "onay sonrasi ana ekran");
+
+        // secim bir kez daha 'M' ile acildiginda ayni klasorden baslamali
+        handle_key(&mut app, tus(KeyCode::Char('M')));
+        assert_eq!(app.browse.as_ref().unwrap().cur, beklenen);
     }
 }

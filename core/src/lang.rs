@@ -87,6 +87,12 @@ pub enum Key {
     TooSmallTitle,
     PressToRetry,
     LabelSrcAction,
+    HintAdjust,
+    OversizedTitle,
+    OversizedTerminal,
+    OversizedMax,
+    OversizedZoom,
+    OversizedIgnore,
     SrcKeep,
     SrcDelete,
     SrcMove,
@@ -417,6 +423,30 @@ pub fn tr(lang: Lang, k: Key) -> &'static str {
         Key::WorkersAuto => match lang {
             Lang::Tr => "Otomatik",
             Lang::En => "Auto",
+        },
+        Key::OversizedTitle => match lang {
+            Lang::Tr => "Ekran çok büyük",
+            Lang::En => "Screen too large",
+        },
+        Key::OversizedTerminal => match lang {
+            Lang::Tr => "Terminal",
+            Lang::En => "Terminal",
+        },
+        Key::OversizedMax => match lang {
+            Lang::Tr => "Desteklenen en büyük boyut",
+            Lang::En => "Largest supported size",
+        },
+        Key::OversizedZoom => match lang {
+            Lang::Tr => "Ekranı zoom out yap (pinch) — aksi halde içerik ekrana sığmaz.",
+            Lang::En => "Zoom out the screen (pinch) — otherwise the content will not fit.",
+        },
+        Key::OversizedIgnore => match lang {
+            Lang::Tr => "u: uyarıyı yoksay ve devam et   q / Esc: çıkış",
+            Lang::En => "u: ignore warning and continue   q / Esc: quit",
+        },
+        Key::HintAdjust => match lang {
+            Lang::Tr => "+/-: değeri değiştir",
+            Lang::En => "+/-: change value",
         },
         Key::LabelBitrate => match lang {
             Lang::Tr => "Bitrate",

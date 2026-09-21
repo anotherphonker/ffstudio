@@ -149,6 +149,32 @@ fn window(len: usize, sel: usize, height: usize) -> (usize, usize) {
 pub const MIN_COLS: u16 = 20;
 pub const MIN_ROWS: u16 = 8;
 
+/// Bu boyuttan BUYUK terminallerde arayuz bu alana kirpilir ve orta­lanir;
+/// ayrica TUI'yi kaplayan "zoom out yap" uyarisi gosterilir.
+/// (Termux'ta pinch-zoom ile font kucultulunce satir/sutun sayisi cok artar;
+///  bir noktadan sonra icerik okunaksiz/dağınık olur ve ekrana sigmaz.)
+pub const MAX_COLS: u16 = 200;
+pub const MAX_ROWS: u16 = 60;
+
+/// Terminal desteklenen en buyuk boyuttan buyuk mu?
+pub fn oversized(area: Rect) -> bool {
+    area.width > MAX_COLS || area.height > MAX_ROWS
+}
+
+/// Arayuzun CIZILECEGI alan: en buyuk desteklenen boyuta kirpilir ve
+/// terminalin ortasina yerlestirilir (letterbox). Boylece "en buyuk ama
+/// her seyin sigdigi" cozunurluk kullanilir; icerik asla gerilmez.
+pub fn effective_area(area: Rect) -> Rect {
+    let w = area.width.min(MAX_COLS);
+    let h = area.height.min(MAX_ROWS);
+    Rect {
+        x: area.x + (area.width - w) / 2,
+        y: area.y + (area.height - h) / 2,
+        width: w,
+        height: h,
+    }
+}
+
 /// Ust/yan panellerin toplam yuzdesi; artani ESMEYEN govde paneli alir.
 /// Ornek: 13+15+13+4 = %45 yan/ust bantlar, kalan ~%55 govde.
 const PCT_HEADER: u16 = 13;
@@ -214,19 +240,19 @@ pub fn draw(f: &mut Frame, app: &mut App) {
         return;
     }
 
-    // 2) Termux depolama izni yoksa: dosya gezici yerine net Turkce hata ekrani
+    // Ekran desteklenen en buyuk boyuttan buyukse: arayuz EN BUYUK sigabilen
+    // cozunurlukte (ortalanmis) cizilir; en sonda TUMUNU kaplayan uyari gelir.
+    // (MAX'in altindaysa eff == area olur, yani hicbir sey degismez.)
+    let eff = effective_area(area);
+
     if app.storage_error.is_some() {
-        draw_storage_error(f, app, &p, area);
-        return;
-    }
-
-    if matches!(app.mode, Mode::Browse) {
-        draw_browse(f, app, &p);
-        return;
-    }
-
-    let narrow = area.width < 110;
-    let chunks = main_layout(area);
+        // 2) Termux depolama izni yoksa: dosya gezici yerine net Turkce hata ekrani
+        draw_storage_error(f, app, &p, eff);
+    } else if matches!(app.mode, Mode::Browse) {
+        draw_browse(f, app, &p, eff);
+    } else {
+    let narrow = eff.width < 110;
+    let chunks = main_layout(eff);
 
     draw_header(f, app, &p, chunks[0]);
 
@@ -275,17 +301,87 @@ pub fn draw(f: &mut Frame, app: &mut App) {
 
     // Popuplar
     match app.mode {
-        Mode::Preset => draw_preset_popup(f, app, &p),
-        Mode::Settings => draw_settings_popup(f, app, &p),
-        Mode::Help => draw_help_popup(f, app, &p),
+        Mode::Preset => draw_preset_popup(f, app, &p, eff),
+        Mode::Settings => draw_settings_popup(f, app, &p, eff),
+        Mode::Help => draw_help_popup(f, app, &p, eff),
         _ => {}
     }
     if app.input.is_some() {
-        draw_input_popup(f, app, &p);
+        draw_input_popup(f, app, &p, eff);
     }
     if app.quit_confirm {
-        draw_quit_popup(f, app, &p);
+        draw_quit_popup(f, app, &p, eff);
     }
+    } // ana ekran blogu sonu
+
+    // 3) Ekran desteklenenden buyukse: TUI'yi kaplayan uyari (en son cizilir,
+    //    bu yuzden TUM modlarda gorunur: ana ekran, gezici, depolama hatasi).
+    if oversized(area) && !app.big_screen_ack {
+        draw_oversized_warning(f, app, &p, area, eff);
+    }
+}
+
+/// "Ekran cok buyuk" uyarisi: TUM ekrani kaplar (TUI gorunmez) ve kullaniciya
+/// zoom out yapmasini soyler. `u` ile yok sayilabilir; bir sonraki resize'TA
+/// (pinch-zoom) uyari kendiliginden geri gelir.
+fn draw_oversized_warning(f: &mut Frame, app: &App, p: &Palette, area: Rect, eff: Rect) {
+    let l = app.lang;
+    // 1) TUI'yi tamamen kapat (uyari ekranin TAMAMINI kaplar)
+    f.render_widget(Clear, area);
+    f.render_widget(Block::default().style(Style::default().bg(p.bg)), area);
+
+    // 2) Ortalanmis uyari kutusu
+    let kutu = centered(area, pct(area, 78, 30, 76), pct_h(area, 40, 7, 11));
+    f.render_widget(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(p.warn).add_modifier(Modifier::BOLD))
+            .style(Style::default().bg(p.bg))
+            .title(format!(" {} ", tr(l, Key::OversizedTitle))),
+        kutu,
+    );
+    let inner = Rect {
+        x: kutu.x + 1,
+        y: kutu.y + 1,
+        width: kutu.width.saturating_sub(2),
+        height: kutu.height.saturating_sub(2),
+    };
+
+    let satirlar = vec![
+        // Simdiki boyut ve desteklenen en buyuk boyut
+        Line::from(Span::styled(
+            format!(
+                "{}: {}x{}      {}: {}x{}",
+                tr(l, Key::OversizedTerminal),
+                area.width,
+                area.height,
+                tr(l, Key::OversizedMax),
+                MAX_COLS,
+                MAX_ROWS
+            ),
+            Style::default().fg(p.fg),
+        )),
+        Line::from(Span::styled(
+            format!("({}x{})", eff.width, eff.height),
+            Style::default().fg(p.dim),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            tr(l, Key::OversizedZoom),
+            Style::default().fg(p.warn).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            tr(l, Key::OversizedIgnore),
+            Style::default().fg(p.dim),
+        )),
+    ];
+    f.render_widget(
+        Paragraph::new(Text::from(satirlar))
+            .alignment(ratatui::layout::Alignment::Center)
+            .wrap(Wrap { trim: true }),
+        inner,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -374,10 +470,20 @@ fn draw_status(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
     } else {
         "a:ekle  c:donustur  p:preset  o:cikti  r:kaynak  w:uzerine-yaz  s:ayarlar  ?:yardim  q:cikis"
     };
-    let line = Line::from(vec![
-        Span::styled(hint, Style::default().fg(p.dim)),
-    ]);
-    f.render_widget(Paragraph::new(line).wrap(Wrap { trim: true }), area);
+    let mut spans = vec![Span::styled(hint, Style::default().fg(p.dim))];
+    // +/- ipucu: yalnizca secili preset'te +/- bir seyi degistiriyorsa VE
+    // durum cubuguna sigiyorsa eklenir (kirpilip yarim gorunmesin).
+    if !app.running && app.profile.preset.has_adjust() {
+        let ek = format!("   {}", tr(app.lang, Key::HintAdjust));
+        let genislik = hint.chars().count() + ek.chars().count();
+        if area.width as usize >= genislik {
+            spans.push(Span::styled(ek, Style::default().fg(p.warn)));
+        }
+    }
+    f.render_widget(
+        Paragraph::new(Line::from(spans)).wrap(Wrap { trim: true }),
+        area,
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -471,21 +577,32 @@ fn draw_profile(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
 
     match pr.preset {
         Preset::Mp3Cbr => {
-            lines.push(kv(p, tr(l, Key::LabelBitrate), &format!("{} kbps", pr.mp3_cbr)));
+            lines.push(kv_hint(
+                p,
+                tr(l, Key::LabelBitrate),
+                &format!("{} kbps", pr.mp3_cbr),
+                tr(l, Key::HintAdjust),
+            ));
         }
         Preset::Aac => {
-            lines.push(kv(
+            lines.push(kv_hint(
                 p,
                 tr(l, Key::LabelBitrate),
                 &if pr.aac_kbps == 0 { "VBR".to_string() } else { format!("{} kbps", pr.aac_kbps) },
+                tr(l, Key::HintAdjust),
             ));
         }
         Preset::Opus => {
-            lines.push(kv(p, tr(l, Key::LabelBitrate), &format!("{} kbps", pr.opus_kbps)));
+            lines.push(kv_hint(
+                p,
+                tr(l, Key::LabelBitrate),
+                &format!("{} kbps", pr.opus_kbps),
+                tr(l, Key::HintAdjust),
+            ));
         }
         Preset::Flac | Preset::Wav => {}
         p2 if p2.is_video() => {
-            lines.push(kv(p, tr(l, Key::Crf), &format!("{}", pr.crf)));
+            lines.push(kv_hint(p, tr(l, Key::Crf), &format!("{}", pr.crf), tr(l, Key::HintAdjust)));
             lines.push(kv(
                 p,
                 tr(l, Key::EncodeSpeed),
@@ -502,24 +619,44 @@ fn draw_profile(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
             lines.push(kv(p, tr(l, Key::MaxWidth), &format!("{}", if pr.max_width == 0 { 0 } else { pr.max_width })));
         }
         p2 if p2.is_image() => {
-            lines.push(kv(p, tr(l, Key::Quality), &format!("{}", pr.img_quality)));
+            lines.push(kv_hint(
+                p,
+                tr(l, Key::Quality),
+                &format!("{}", pr.img_quality),
+                tr(l, Key::HintAdjust),
+            ));
             lines.push(kv(p, tr(l, Key::MaxWidth), &format!("{}", pr.max_width)));
         }
         _ => {}
     }
     if pr.preset == Preset::TargetSize {
-        lines.push(kv(p, tr(l, Key::TargetSize), &format!("{} MB", pr.target_mb)));
+        lines.push(kv_hint(
+            p,
+            tr(l, Key::TargetSize),
+            &format!("{} MB", pr.target_mb),
+            tr(l, Key::HintAdjust),
+        ));
     }
     if pr.preset == Preset::Clip || pr.preset == Preset::Gif {
         lines.push(kv(p, tr(l, Key::TrimStart), if pr.trim_start.is_empty() { "-" } else { &pr.trim_start }));
         lines.push(kv(p, tr(l, Key::TrimEnd), if pr.trim_end.is_empty() { "-" } else { &pr.trim_end }));
     }
     if pr.preset == Preset::Gif {
-        lines.push(kv(p, tr(l, Key::GifWidthLabel), &format!("{}", pr.gif_width)));
+        lines.push(kv_hint(
+            p,
+            tr(l, Key::GifWidthLabel),
+            &format!("{}", pr.gif_width),
+            tr(l, Key::HintAdjust),
+        ));
         lines.push(kv(p, tr(l, Key::GifFpsLabel), &format!("{}", pr.gif_fps)));
     }
     if pr.preset == Preset::Split {
-        lines.push(kv(p, tr(l, Key::SplitSecsLabel), &format!("{}", pr.split_secs)));
+        lines.push(kv_hint(
+            p,
+            tr(l, Key::SplitSecsLabel),
+            &format!("{}", pr.split_secs),
+            tr(l, Key::HintAdjust),
+        ));
     }
     if pr.preset == Preset::Merge {
         lines.push(kv(p, tr(l, Key::MergeNameLabel), if pr.merge_name.is_empty() { "-" } else { &pr.merge_name }));
@@ -577,6 +714,19 @@ fn kv(p: &Palette, k: &str, v: &str) -> Line<'static> {
     Line::from(vec![
         Span::styled(format!("  {k} "), Style::default().fg(p.dim)),
         Span::styled(v.to_string(), Style::default().fg(p.fg)),
+    ])
+}
+
+/// `kv` ile ayni, ama degerin SAGINA soluk bir tus ipucu ekler:
+///   `  Bitrate: 320 kbps   (+/-: değeri değiştir)`
+/// Ipucu yalnizca +/- 'nin gercekten bir sey degistirdigi preset'lerde
+/// kullanilir (bkz. `Preset::has_adjust`).
+fn kv_hint(p: &Palette, k: &str, v: &str, hint: &str) -> Line<'static> {
+    let k = if k.ends_with(':') { k.to_string() } else { format!("{k}:") };
+    Line::from(vec![
+        Span::styled(format!("  {k} "), Style::default().fg(p.dim)),
+        Span::styled(v.to_string(), Style::default().fg(p.fg)),
+        Span::styled(format!("   ({hint})"), Style::default().fg(p.dim)),
     ])
 }
 
@@ -882,9 +1032,9 @@ fn centered(area: Rect, w: u16, h: u16) -> Rect {
     }
 }
 
-fn draw_preset_popup(f: &mut Frame, app: &App, p: &Palette) {
-    let h = (Preset::ALL.len() as u16 + 4).min(pct_h(f.area(), 80, 6, f.area().height));
-    let area = centered(f.area(), pct(f.area(), 72, 30, 68), h);
+fn draw_preset_popup(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
+    let h = (Preset::ALL.len() as u16 + 4).min(pct_h(area, 80, 6, area.height));
+    let area = centered(area, pct(area, 72, 30, 68), h);
     f.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -925,8 +1075,8 @@ fn draw_preset_popup(f: &mut Frame, app: &App, p: &Palette) {
     f.render_widget(List::new(items[start..end].to_vec()), inner);
 }
 
-fn draw_settings_popup(f: &mut Frame, app: &App, p: &Palette) {
-    let area = centered(f.area(), pct(f.area(), 70, 34, 66), pct_h(f.area(), 70, 8, 16));
+fn draw_settings_popup(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
+    let area = centered(area, pct(area, 70, 34, 66), pct_h(area, 70, 8, 16));
     f.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -984,8 +1134,8 @@ fn config_hint(app: &App) -> String {
     }
 }
 
-fn draw_help_popup(f: &mut Frame, app: &App, p: &Palette) {
-    let area = centered(f.area(), pct(f.area(), 76, 34, 74), pct_h(f.area(), 86, 8, 22));
+fn draw_help_popup(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
+    let area = centered(area, pct(area, 76, 34, 74), pct_h(area, 86, 8, 22));
     f.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1005,6 +1155,7 @@ fn draw_help_popup(f: &mut Frame, app: &App, p: &Palette) {
         ("s", tr(l, Key::SettingsTitle)),
         ("Tab / Shift+Tab", tr(l, Key::SecFiles)),
         ("↑ ↓ / j k", tr(l, Key::StRunning)),
+        ("+ / -", tr(l, Key::HintAdjust)),
         ("Enter", tr(l, Key::Done)),
         ("?" , tr(l, Key::AboutBtn)),
         ("q", tr(l, Key::Clear)),
@@ -1028,7 +1179,7 @@ fn draw_help_popup(f: &mut Frame, app: &App, p: &Palette) {
     f.render_widget(Paragraph::new(Text::from(lines)).wrap(Wrap { trim: true }), inner);
 }
 
-fn draw_input_popup(f: &mut Frame, app: &App, p: &Palette) {
+fn draw_input_popup(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
     let Some(inp) = &app.input else { return };
     let title = match inp.target {
         crate::app::InputTarget::CustomArgs => tr(app.lang, Key::CustomArgs),
@@ -1036,15 +1187,15 @@ fn draw_input_popup(f: &mut Frame, app: &App, p: &Palette) {
         crate::app::InputTarget::TrimEnd => tr(app.lang, Key::TrimEnd),
         crate::app::InputTarget::MergeName => tr(app.lang, Key::MergeNameLabel),
     };
-    let area = centered(f.area(), pct(f.area(), 74, 30, 70), pct_h(f.area(), 30, 4, 5));
-    f.render_widget(Clear, area);
+    let kutu = centered(area, pct(area, 74, 30, 70), pct_h(area, 30, 4, 5));
+    f.render_widget(Clear, kutu);
     let block = Block::default()
         .borders(Borders::ALL)
         .title(format!(" {title} "))
         .border_style(Style::default().fg(p.accent))
         .style(Style::default().bg(p.bg));
-    let inner = block.inner(area);
-    f.render_widget(block, area);
+    let inner = block.inner(kutu);
+    f.render_widget(block, kutu);
     let txt = Text::from(vec![
         Line::from(Span::styled(
             format!("> {}", inp.buf),
@@ -1058,8 +1209,8 @@ fn draw_input_popup(f: &mut Frame, app: &App, p: &Palette) {
     f.render_widget(Paragraph::new(txt).wrap(Wrap { trim: true }), inner);
 }
 
-fn draw_quit_popup(f: &mut Frame, app: &App, p: &Palette) {
-    let area = centered(f.area(), pct(f.area(), 60, 26, 50), pct_h(f.area(), 30, 4, 5));
+fn draw_quit_popup(f: &mut Frame, app: &App, p: &Palette, area: Rect) {
+    let area = centered(area, pct(area, 60, 26, 50), pct_h(area, 30, 4, 5));
     f.render_widget(Clear, area);
     let block = Block::default()
         .borders(Borders::ALL)
@@ -1082,9 +1233,8 @@ fn draw_quit_popup(f: &mut Frame, app: &App, p: &Palette) {
 // Gezici ekrani (tam ekran)
 // ---------------------------------------------------------------------------
 
-fn draw_browse(f: &mut Frame, app: &mut App, p: &Palette) {
+fn draw_browse(f: &mut Frame, app: &mut App, p: &Palette, area: Rect) {
     let Some(b) = app.browse.as_mut() else { return };
-    let area = f.area();
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -1291,5 +1441,271 @@ mod tests {
         let w = wrap("ffmpeg -i a.flac -c:a libmp3lame out.mp3", 12);
         assert!(w.len() > 1, "uzun komut sarilmali");
         assert!(w.iter().all(|s| s.len() <= 13));
+    }
+
+    // ------------------------------------------------------------------
+    // "+/-" ipucu (bitrate/CRF/kalite satirlari + alt durum cubugu)
+    // ------------------------------------------------------------------
+
+    fn gecici_config() {
+        let d = std::env::temp_dir().join(format!("ffstudio_ui_cfg_{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        std::env::set_var("XDG_CONFIG_HOME", &d);
+    }
+
+    /// Alt durum cubugunu (ipucu satirini) bulur.
+    fn alt_bar(ekran: &[String]) -> &String {
+        ekran
+            .iter()
+            .find(|l| l.contains("a: dosya/klasor ekle") || l.contains("a:ekle"))
+            .expect("durum cubugu cizilmeli")
+    }
+
+    /// Ekrani metin olarak doker (satir satir).
+    fn ciz(app: &mut crate::app::App, w: u16, h: u16) -> Vec<String> {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| draw(f, app)).unwrap();
+        let buf = term.backend().buffer().clone();
+        let gen = buf.area.width as usize;
+        buf.content()
+            .chunks(gen)
+            .map(|r| r.iter().map(|c| c.symbol()).collect::<String>())
+            .collect()
+    }
+
+    /// KULLANICI SORUSU: "Bitrate: {n} kbps" satirinda "+/-" ipucu var mi?
+    /// Cevap: evet -> degerin hemen yaninda "(+/-: değeri değiştir)" ve
+    /// ayrica (sigiyorsa) alt durum cubugunda.
+    #[test]
+    fn bitrate_satirinda_arti_eksi_ipucu_var() {
+        use crate::app::{App, Mode};
+        use crate::config::Settings;
+        gecici_config();
+        let mut app = App::new(Settings::default());
+        app.mode = Mode::Main;
+        app.profile.preset = Preset::Mp3Cbr;
+        app.profile.mp3_cbr = 320;
+
+        let ekran = ciz(&mut app, 120, 40);
+        let metin = ekran.join("\n");
+        let satir = ekran
+            .iter()
+            .find(|l| l.contains("Bitrate"))
+            .expect("Bitrate satiri cizilmeli");
+        assert!(satir.contains("320 kbps"), "deger gorunmeli: {satir}");
+        assert!(
+            satir.contains("(+/-: değeri değiştir)"),
+            "ipucu AYNI satirda olmali: {satir}"
+        );
+        // alt durum cubugu (tam genislikte sigar -> eklenir)
+        let bar = alt_bar(&ekran);
+        assert!(
+            bar.contains("+/-: değeri değiştir"),
+            "alt bar ipucu tam olmali: {bar}"
+        );
+        assert!(metin.contains("+/-"));
+
+        // Deger degisince ipucu yerinde kalir
+        app.profile.mp3_cbr = 128;
+        let ekran = ciz(&mut app, 120, 40);
+        let satir = ekran.iter().find(|l| l.contains("Bitrate")).unwrap();
+        assert!(satir.contains("128 kbps") && satir.contains("(+/-"), "{satir}");
+    }
+
+    /// +/- etkisiz olan preset'lerde ipucu GOSTERILMEZ (yanlis yonlendirme yok).
+    #[test]
+    fn etkisiz_presetlerde_ipucu_yok() {
+        use crate::app::{App, Mode};
+        use crate::config::Settings;
+        gecici_config();
+        let mut app = App::new(Settings::default());
+        app.mode = Mode::Main;
+        for p in [Preset::Mp3V0, Preset::Flac, Preset::Remux] {
+            app.profile.preset = p;
+            let metin = ciz(&mut app, 120, 40).join("\n");
+            assert!(
+                !metin.contains("+/-"),
+                "{p:?}: +/- etkisiz oldugu icin ipucu cizilmemeli"
+            );
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // "Ekran cok buyuk" (MAX_COLS/MAX_ROWS) davranisi
+    // ------------------------------------------------------------------
+
+    /// En buyuk desteklenen boyut tam olarak MAX olmali ve kirpma
+    /// ortalanmis olmali (letterbox).
+    #[test]
+    fn effective_area_kirpar_ve_ortalar() {
+        // Sinirda: degisiklik yok
+        let a = Rect::new(0, 0, MAX_COLS, MAX_ROWS);
+        assert!(!oversized(a));
+        assert_eq!(effective_area(a), a);
+
+        // Bir sutun fazla -> kirpilir
+        let a = Rect::new(0, 0, MAX_COLS + 1, MAX_ROWS);
+        assert!(oversized(a));
+        let e = effective_area(a);
+        assert_eq!((e.width, e.height), (MAX_COLS, MAX_ROWS));
+
+        // Buyuk ekran: ortalama (letterbox)
+        let a = Rect::new(0, 0, 240, 80);
+        assert!(oversized(a));
+        let e = effective_area(a);
+        assert_eq!((e.width, e.height), (MAX_COLS, MAX_ROWS));
+        assert_eq!(e.x, 20, "yatay ortalama");
+        assert_eq!(e.y, 10, "dikey ortalama");
+
+        // Kirpilmis alanda layout yine TAM oturuyor (tasma yok)
+        let c = main_layout(e);
+        assert_eq!(c.iter().map(|r| r.height).sum::<u16>(), e.height);
+        assert_eq!(c[0].x, e.x);
+        assert_eq!(c[0].y, e.y);
+    }
+
+    /// Ekran MAX'tan buyukse TUI'yi kaplayan "zoom out" uyarisi cizilir;
+    /// MAX'a kadar (ve tam sinirda) cizilmez.
+    #[test]
+    fn buyuk_ekranda_kapatan_uyari_cizilir() {
+        use crate::app::{App, Mode};
+        use crate::config::Settings;
+        gecici_config();
+        let mut app = App::new(Settings::default());
+        app.mode = Mode::Main;
+        app.profile.preset = Preset::Mp3Cbr;
+
+        // Sinir ve altinda: uyari YOK
+        for (w, h) in [(120u16, 40u16), (MAX_COLS, MAX_ROWS), (MAX_COLS - 1, MAX_ROWS)] {
+            let metin = ciz(&mut app, w, h).join("\n");
+            assert!(
+                !metin.contains("Ekran çok büyük"),
+                "{w}x{h}: uyari cizilmemeli"
+            );
+        }
+
+        // Buyuk ekran: uyari TUM ekrani kaplar ve zoom out der
+        for (w, h) in [(MAX_COLS + 1, MAX_ROWS), (240, 80), (300, 100)] {
+            let ekran = ciz(&mut app, w, h);
+            let metin = ekran.join("\n");
+            assert!(metin.contains("Ekran çok büyük"), "{w}x{h}: baslik yok");
+            assert!(
+                metin.contains("zoom out"),
+                "{w}x{h}: zoom out uyarisi yok"
+            );
+            assert!(
+                metin.contains(&format!("{MAX_COLS}x{MAX_ROWS}")),
+                "{w}x{h}: desteklenen boyut yazilmali"
+            );
+            // TUI KAPLANMIS olmali: panel basliklari gorunmez
+            assert!(
+                !metin.contains("3 - Kuyruk") && !metin.contains("4 - Log"),
+                "{w}x{h}: TUI uyarinin altinda kalmamis"
+            );
+            // Uyari ekranin tamamini kaplar (tum satirlar bos ya da kutunun parcasi)
+            assert_eq!(ekran.len(), h as usize);
+        }
+
+        // 'u' ile yoksayilinca TUI gorunur, uyari gizlenir
+        app.big_screen_ack = true;
+        let metin = ciz(&mut app, 240, 80).join("\n");
+        assert!(!metin.contains("Ekran çok büyük"), "yoksayildi: uyari gitmeli");
+        assert!(metin.contains("3 - Kuyruk"), "yoksayildi: TUI gorunmeli");
+        // ve TUI kirpilmis alanda cizilmis olmali (kirpilan alanin disinda panel yok)
+        let ekran = ciz(&mut app, 240, 80);
+        let e = effective_area(Rect::new(0, 0, 240, 80));
+        for (i, satir) in ekran.iter().enumerate() {
+            if satir.trim().is_empty() {
+                continue;
+            }
+            let y = i as u16;
+            assert!(
+                y >= e.y && y < e.y + e.height,
+                "satir {i}: kirpilan alanin disinda cizim var"
+            );
+        }
+    }
+
+    /// Uyari TUM modlari kaplar: gezici ve depolama hatasi ekraninda da
+    /// buyuk ekranda uyari gorunur; ayrica KUCUK ekran korumasi bozulmaz
+    /// (MAX ile MIN cakismaz: <20 sutun ile >200 sutun ayni anda olamaz).
+    #[test]
+    fn uyari_gezici_ve_depolama_ekranini_da_kaplar() {
+        use crate::app::{App, Mode};
+        use crate::browse::PickMode;
+        use crate::config::Settings;
+        gecici_config();
+        let mut app = App::new(Settings::default());
+
+        // Gezici modu + buyuk ekran -> uyari kaplar
+        app.open_browse(PickMode::Files);
+        assert!(matches!(app.mode, Mode::Browse));
+        let metin = ciz(&mut app, 240, 80).join("\n");
+        assert!(metin.contains("Ekran çok büyük"), "gezicide uyari yok");
+        assert!(!metin.contains("hizli klasorler"), "gezici kaplanmamis");
+        app.mode = Mode::Main;
+        app.browse = None;
+
+        // Depolama hatasi ekrani + buyuk ekran -> uyari kaplar
+        app.storage_error = Some(
+            "Depolama izni verilmemiş.\nTerminale çık, termux-setup-storage çalıştır.".into(),
+        );
+        let metin = ciz(&mut app, 240, 80).join("\n");
+        assert!(metin.contains("Ekran çok büyük"), "depolama ekraninda uyari yok");
+        assert!(!metin.contains("Depolama izni verilmemiş"), "depolama ekrani kaplanmamis");
+        // ...ama MAX icindeki boyutta depolama ekrani normal gorunur
+        let metin = ciz(&mut app, 100, 30).join("\n");
+        assert!(metin.contains("Depolama izni verilmemiş"));
+        assert!(!metin.contains("Ekran çok büyük"));
+        app.storage_error = None;
+
+        // Kucuk ekran korumasi hala gecerli (uyari devreye girmez)
+        let metin = ciz(&mut app, 16, 6).join("\n");
+        assert!(metin.contains("Terminal"), "kucuk ekran mesaji: {metin:?}");
+        assert!(!metin.contains("Ekran çok büyük"), "kucuk ekranda uyari olmamali");
+    }
+
+    /// MAX esigi: her iki yonde de sinirlar net (oversized yalnizca BUYUK icin).
+    #[test]
+    fn oversized_esigi_buyuk_ekranda() {
+        assert!(!oversized(Rect::new(0, 0, MAX_COLS, MAX_ROWS)));
+        assert!(oversized(Rect::new(0, 0, MAX_COLS + 1, MAX_ROWS)));
+        assert!(oversized(Rect::new(0, 0, MAX_COLS, MAX_ROWS + 1)));
+        assert!(!oversized(Rect::new(0, 0, MIN_COLS, MIN_ROWS)));
+    }
+
+    /// Dar terminalde alt bar ipucu kirpilmaz: ya tamamen gorunur ya hic.
+    #[test]
+    fn dar_terminalde_alt_bar_ipucu_kirpilmaz() {
+        use crate::app::{App, Mode};
+        use crate::config::Settings;
+        gecici_config();
+        let mut app = App::new(Settings::default());
+        app.mode = Mode::Main;
+        app.profile.preset = Preset::Mp3Cbr;
+        for w in [40u16, 60, 80, 100, 120, 160] {
+            let ekran = ciz(&mut app, w, 30);
+            // Ipucu yarim (orn. "+/") HICBIR satirda gorunmemeli: ya tam ya hic.
+            for l in &ekran {
+                if l.contains("+/-") {
+                    assert!(
+                        l.contains("+/-: değeri değiştir"),
+                        "{w}: yarim/bozuk ipucu: {l}"
+                    );
+                }
+            }
+            // dar terminalde alt bara SIGMIYORSA hic eklenmemeli
+            let bar = alt_bar(&ekran);
+            if w >= 120 {
+                assert!(bar.contains("+/-"), "{w}: genis terminalde eklenmeli");
+            } else if bar.contains("+/-") {
+                assert!(
+                    bar.chars().count() <= w as usize,
+                    "{w}: ipucu tasmamali"
+                );
+            }
+        }
     }
 }

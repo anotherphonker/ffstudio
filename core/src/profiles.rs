@@ -241,6 +241,25 @@ impl Preset {
         )
     }
 
+    /// `+` / `-` tuslari bu preset'te GORUNUR bir parametreyi degistiriyor mu?
+    ///
+    /// TUI, "(-/+: ...)" ipucunu yalnizca bu preset'lerde gosterir; boylece
+    /// hicbir sey degistirmeyen tusler icin yanlis yonlendirme olmaz.
+    /// (Orn. MP3 V0/V2, FLAC, WAV, Remux, Merge, Clip: +/- cikti komutuna
+    /// dokunmaz -> ipucu gosterilmez.)
+    pub fn has_adjust(self) -> bool {
+        match self {
+            Preset::Mp3Cbr
+            | Preset::Aac
+            | Preset::Opus
+            | Preset::TargetSize
+            | Preset::Gif
+            | Preset::Split => true,
+            p if p.is_video() || p.is_image() => true,
+            _ => false,
+        }
+    }
+
     pub fn is_image(self) -> bool {
         matches!(
             self,
@@ -892,6 +911,36 @@ mod tests {
             }),
             bit_rate: Some(4_192_000),
             extra: vec![],
+        }
+    }
+
+    /// `has_adjust()` gercekten +/- 'nin cikti komutunu degistirdigi
+    /// preset'lerde true olmali (TUI ipucu buna bakar).
+    #[test]
+    fn has_adjust_ciktiyi_degistiren_presetlerde_true() {
+        for p in [
+            Preset::Mp3Cbr,
+            Preset::Aac,
+            Preset::Opus,
+            Preset::H264Mp4,
+            Preset::Jpeg,
+            Preset::TargetSize,
+            Preset::Gif,
+            Preset::Split,
+            Preset::Clip,
+        ] {
+            assert!(p.has_adjust(), "{p:?} icin ipucu gosterilmeli");
+        }
+        for p in [
+            Preset::Auto,
+            Preset::Mp3V0,
+            Preset::Mp3V2,
+            Preset::Flac,
+            Preset::Wav,
+            Preset::Remux,
+            Preset::Merge,
+        ] {
+            assert!(!p.has_adjust(), "{p:?} icin +/- etkisiz, ipucu gosterilmemeli");
         }
     }
 
